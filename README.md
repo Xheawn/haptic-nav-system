@@ -15,9 +15,9 @@ This system provides two layers of navigation guidance through vibration motors:
 iPhone 13 Pro                          ESP32-S3
 ┌──────────────────────┐    BLE     ┌──────────────────┐
 │  Google Maps API     │───────────▶│  Command Parser  │
-│  ARKit LiDAR (256×192)│  2-byte   │  Motor L (PWM)   │
-│  ViewController      │  packet   │  Motor R (PWM)   │
-│  BLEManager          │           └──────────────────┘
+│ ARKit LiDAR (256×192)│  2-byte    |  Motor L (PWM)   │
+│  ViewController      │  packet    │  Motor R (PWM)   │
+│  BLEManager          │            └──────────────────┘
 │  LiDARManager        │
 └──────────────────────┘
 ```
