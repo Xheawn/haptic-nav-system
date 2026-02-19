@@ -21,5 +21,8 @@ Package.resolved
 # R
 .Rhistory
 
+# Secrets (API keys)
+Secrets.plist
+
 # Windsurf
 .windsurf/

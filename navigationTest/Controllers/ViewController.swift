@@ -4,7 +4,6 @@
 //
 //  Created by 殷雄 on 3/20/25.
 //
-//  AIzaSyDuq-bA6uuLX6oXoUFuKVRZlShHYhdBsFQ
 import UIKit
 import CoreLocation
 import GoogleMaps
@@ -14,9 +13,15 @@ class ViewController: UIViewController {
 
     // 地图视图实例
     var mapView: GMSMapView!
-    // Google Maps API Key
-    // previous jacky's apiKey = "AIzaSyDuq-bA6uuLX6oXoUFuKVRZlShHYhdBsFQ"
-    let apiKey = "AIzaSyAjtEhPZ8yCgx0gMgm15T8VskDJdTWH5bg"
+    // Google Maps API Key — loaded from Secrets.plist (not committed to git)
+    let apiKey: String = {
+        guard let path = Bundle.main.path(forResource: "Secrets", ofType: "plist"),
+              let dict = NSDictionary(contentsOfFile: path),
+              let key = dict["GOOGLE_MAPS_API_KEY"] as? String else {
+            fatalError("Missing Secrets.plist or GOOGLE_MAPS_API_KEY. See README.")
+        }
+        return key
+    }()
     
     // 起点根据用户实时定位变，终点亦可变
     var origin = "Maple Hall, University of Washington, Seattle, WA"

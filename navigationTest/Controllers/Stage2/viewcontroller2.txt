@@ -4,7 +4,7 @@
 //
 //  Created by 殷雄 on 3/20/25.
 //
-//  AIzaSyDuq-bA6uuLX6oXoUFuKVRZlShHYhdBsFQ
+//  YOUR_API_KEY_HERE
 /*
 import UIKit
 import CoreLocation
@@ -15,7 +15,7 @@ class ViewController: UIViewController {
 
     var mapView: GMSMapView!
     let locationManager = CLLocationManager()
-    let apiKey = "AIzaSyDuq-bA6uuLX6oXoUFuKVRZlShHYhdBsFQ"
+    let apiKey = "YOUR_API_KEY_HERE"
 
     var points: [Point] = [] // 当前路径点数组
     var threshold3Timer: Timer? // 阈值3定时器

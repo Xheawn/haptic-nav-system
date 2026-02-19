@@ -4,7 +4,7 @@
 //
 //  Created by 殷雄 on 3/20/25.
 //
-//  AIzaSyDuq-bA6uuLX6oXoUFuKVRZlShHYhdBsFQ
+//  YOUR_API_KEY_HERE
 import UIKit
 import CoreLocation
 import GoogleMaps
@@ -15,7 +15,7 @@ class ViewController: UIViewController {
     // 地图视图实例
     var mapView: GMSMapView!
     // Google Maps API Key
-    let apiKey = "AIzaSyDuq-bA6uuLX6oXoUFuKVRZlShHYhdBsFQ"
+    let apiKey = "YOUR_API_KEY_HERE"
     
     // 起点可变，终点不变
     // var origin = "Maple Hall, University of Washington, Seattle, WA"

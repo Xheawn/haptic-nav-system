@@ -4,14 +4,14 @@
 //
 //  Created by 殷雄 on 3/20/25.
 //
-//  AIzaSyDuq-bA6uuLX6oXoUFuKVRZlShHYhdBsFQ
+//  [API_KEY_REMOVED]
 import UIKit
 import GoogleMaps
 
 class ViewController: UIViewController {
 
     var mapView: GMSMapView!
-    let apiKey = "AIzaSyDuq-bA6uuLX6oXoUFuKVRZlShHYhdBsFQ"
+    let apiKey = "YOUR_API_KEY_HERE"
 
     override func viewDidLoad() {
         super.viewDidLoad()

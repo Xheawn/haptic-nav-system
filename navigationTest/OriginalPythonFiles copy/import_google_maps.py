@@ -13,7 +13,7 @@ RADIUS = 2.0
 points: List[Point] = []
 
 # 请用你的 API Key 替换下面的 YOUR_API_KEY
-gmaps = googlemaps.Client(key='AIzaSyDuq-bA6uuLX6oXoUFuKVRZlShHYhdBsFQ')
+gmaps = googlemaps.Client(key='YOUR_API_KEY_HERE')
 icloud_data = GPS.login("AppleID", "Password")
 
 # 定义起点和终点地址(假设 UW 的 Maple Hall 和 UW 的 CSE Building 在 Seattle 校区)

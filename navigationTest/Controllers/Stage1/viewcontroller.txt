@@ -8,7 +8,7 @@ class ViewController: UIViewController {
     // 地图视图实例
     var mapView: GMSMapView!
     // Google Maps API Key
-    let apiKey = "AIzaSyDuq-bA6uuLX6oXoUFuKVRZlShHYhdBsFQ"
+    let apiKey = "YOUR_API_KEY_HERE"
 
     // 定位管理器，用于GPS和方向信息
     let locationManager = CLLocationManager()
