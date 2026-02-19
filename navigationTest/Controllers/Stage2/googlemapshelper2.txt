@@ -1,0 +1,139 @@
+//
+//  GoogleMapsHelper.swift
+//  navigation
+//
+//  Created by 殷雄 on 3/26/25.
+//
+/*
+import UIKit
+import GoogleMaps
+import CoreLocation
+
+// Google Maps辅助类，处理路径请求、绘制及区域计算
+class GoogleMapsHelper {
+
+    static let shared = GoogleMapsHelper()
+
+    private init() {}
+
+    // 请求Google Directions API获取路径polyline
+    func fetchDirections(origin: String, destination: String, apiKey: String, completion: @escaping (String?) -> Void) {
+        let originEncoded = origin.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!
+        let destinationEncoded = destination.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!
+        let directionsURL = "https://maps.googleapis.com/maps/api/directions/json?origin=\(originEncoded)&destination=\(destinationEncoded)&mode=walking&key=\(apiKey)"
+
+        URLSession.shared.dataTask(with: URL(string: directionsURL)!) { data, _, error in
+            guard let data = data, error == nil,
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let route = (json["routes"] as? [[String: Any]])?.first,
+                let polyline = (route["overview_polyline"] as? [String: Any])?["points"] as? String else {
+                completion(nil)
+                return
+            }
+            completion(polyline)
+        }.resume()
+    }
+
+    // 在地图上绘制路径以及阈值1（绿色圆圈）和阈值2（黄色平行四边形）
+    func drawRouteWithThresholds(polyline: String, mapView: GMSMapView) -> [Point] {
+        guard let path = GMSPath(fromEncodedPath: polyline) else { return [] }
+        var points: [Point] = []
+
+        // 绘制路径线
+        let routeLine = GMSPolyline(path: path)
+        routeLine.strokeColor = .systemBlue
+        routeLine.strokeWidth = 5.0
+        routeLine.map = mapView
+
+        for i in 0..<Int(path.count()) {
+            let coord = path.coordinate(at: UInt(i))
+            let nextCoord = i < Int(path.count()) - 1 ? path.coordinate(at: UInt(i+1)) : nil
+            let angle = nextCoord != nil ? calculateAngle(from: coord, to: nextCoord!) : nil
+
+            let point = Point(index: i, latitude: coord.latitude, longitude: coord.longitude, angle: angle)
+            points.append(point)
+
+            // 阈值1 (绿色圆)
+            let circle = GMSCircle(position: coord, radius: 2.0)
+            circle.strokeColor = .green
+            circle.map = mapView
+
+            // 阈值2 (黄色平行四边形)
+            if let nextCoord = nextCoord {
+                let quadCoords = createQuadrilateral(point1: point, point2: Point(index: i+1, latitude: nextCoord.latitude, longitude: nextCoord.longitude, angle: nil))
+                let pathQuad = GMSMutablePath()
+                quadCoords.forEach { pathQuad.add($0) }
+                let quadPolygon = GMSPolygon(path: pathQuad)
+                quadPolygon.strokeColor = .yellow
+                quadPolygon.map = mapView
+            }
+        }
+
+        return points
+    }
+
+    // 计算两点之间的实际距离（米）
+    func distanceInMeters(from coord1: CLLocationCoordinate2D, to coord2: CLLocationCoordinate2D) -> Double {
+        let loc1 = CLLocation(latitude: coord1.latitude, longitude: coord1.longitude)
+        let loc2 = CLLocation(latitude: coord2.latitude, longitude: coord2.longitude)
+        return loc1.distance(from: loc2)
+    }
+
+    // 构建两点之间的平行四边形区域
+    func createQuadrilateral(point1: Point, point2: Point) -> [CLLocationCoordinate2D] {
+        let halfWidth = 2.0
+        let perpBearing = (point1.angle ?? 0) + 90.0
+
+        let coord1 = CLLocationCoordinate2D(latitude: point1.latitude, longitude: point1.longitude)
+        let coord2 = CLLocationCoordinate2D(latitude: point2.latitude, longitude: point2.longitude)
+
+        let A1 = coordinate(from: coord1, distanceMeters: halfWidth, bearingDegrees: perpBearing)
+        let A2 = coordinate(from: coord1, distanceMeters: halfWidth, bearingDegrees: perpBearing - 180)
+        let B1 = coordinate(from: coord2, distanceMeters: halfWidth, bearingDegrees: perpBearing)
+        let B2 = coordinate(from: coord2, distanceMeters: halfWidth, bearingDegrees: perpBearing - 180)
+
+        return [A1, B1, B2, A2]
+    }
+
+    // 判断点是否在四边形内
+    func isPoint(_ p: CLLocationCoordinate2D, insideQuadrilateral quad: [CLLocationCoordinate2D]) -> Bool {
+        guard quad.count == 4 else { return false }
+        let A = quad[0], B = quad[1], C = quad[2], D = quad[3]
+
+        func cross(_ a: CLLocationCoordinate2D, _ b: CLLocationCoordinate2D, _ c: CLLocationCoordinate2D) -> Double {
+            return (b.longitude - a.longitude) * (c.latitude - a.latitude) - (b.latitude - a.latitude) * (c.longitude - a.longitude)
+        }
+
+        let cross1 = cross(A, B, p)
+        let cross2 = cross(B, C, p)
+        let cross3 = cross(C, D, p)
+        let cross4 = cross(D, A, p)
+
+        return (cross1 >= 0 && cross2 >= 0 && cross3 >= 0 && cross4 >= 0) || (cross1 <= 0 && cross2 <= 0 && cross3 <= 0 && cross4 <= 0)
+    }
+
+    // 计算给定方位角和距离后的新坐标
+    func coordinate(from coord: CLLocationCoordinate2D, distanceMeters: Double, bearingDegrees: Double) -> CLLocationCoordinate2D {
+        let R = 6378137.0
+        let bearingRad = bearingDegrees * .pi / 180.0
+        let lat1 = coord.latitude * .pi / 180.0
+        let lon1 = coord.longitude * .pi / 180.0
+
+        let lat2 = asin(sin(lat1) * cos(distanceMeters/R) + cos(lat1) * sin(distanceMeters/R) * cos(bearingRad))
+        let lon2 = lon1 + atan2(sin(bearingRad) * sin(distanceMeters/R) * cos(lat1), cos(distanceMeters/R) - sin(lat1) * sin(lat2))
+
+        return CLLocationCoordinate2D(latitude: lat2 * 180.0 / .pi, longitude: lon2 * 180.0 / .pi)
+    }
+
+    // 计算两个坐标之间的角度
+    private func calculateAngle(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) -> Double {
+        let deltaX = end.longitude - start.longitude
+        let deltaY = end.latitude - start.latitude
+        let radians = atan2(deltaY, deltaX)
+        var degrees = radians * (180.0 / .pi)
+        if degrees < 0 { degrees += 360 }
+        return degrees
+    }
+}
+
+*/

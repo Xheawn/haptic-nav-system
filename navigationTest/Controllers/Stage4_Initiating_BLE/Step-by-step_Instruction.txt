@@ -1,0 +1,34 @@
+//
+//  Untitled.swift
+//  navigationTest
+//
+//  Created by Xiong Yin on 2/4/26.
+
+
+• Step 1: Define the BLE protocol (service/characteristic UUIDs and a tiny command format).
+• Step 2: Add iOS permissions (Info.plist) and a minimal BLE manager skeleton (no app logic yet).
+• Step 3: Prepare the ESP32 to advertise the service and accept commands.
+• Step 4: Connect from iOS to ESP32 and confirm we can write a test command.
+• Step 5: Map your Google Maps “expected angle” vs. phone heading to haptic intensities and send commands with throttling.
+• Step 6: Add optional UI (connect status/test buzz) and refine patterns (off-route, arrival, etc.).
+
+/* Shawn:
+1. what are uuids? why they have such values that we need to set to?
+2. Help me check then add these new logics:
+AngleDiff = Orientation of your phone - Expected Orientation;
+AdjustDirection = 0;
+// AdjustDirection has three values: 0 means both motors no vibration, 1 means left motor vibrate, and 2 means right motor should vibrate.
+If AngleDiff > 5 && AngleDiff <= 180:
+AdjustDirection = 2; AngleDiff = AngleDiff;
+else if AngleDiff > 5 && AngleDiff > 180:
+AdjustDirection = 1; AngleDiff = 360 - AngleDiff;
+else if AngleDiff < -5 && AngleDiff <= -180:
+AdjustDirection = 2; AngleDiff = 360 + AngleDiff;
+else if AngleDiff < -5 && AngleDiff > -180:
+AdjustDirection = 1; AngleDiff = -1 * AngleDiff;
+else:
+AdjustDirection = 0; AngleDiff =  AngleDiff;
+If the user is detected to be at a location that is off-route (outside of threshold 1 & 2):
+AdjustDirection = 3; AngleDiff =  AngleDiff;
+3. I am thinking we only need to send the values of AdjustDirection and AngleDiff to the ESP32 in real-time. Then I can have some logic programmed thru arduino onto the ESP32  to deal with these two values there and based on them to let the motors to vibrate. What do you think?
+*/

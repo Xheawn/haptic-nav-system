@@ -1,0 +1,119 @@
+//
+//  ViewController.swift
+//  navigation
+//
+//  Created by 殷雄 on 3/20/25.
+//
+//  AIzaSyDuq-bA6uuLX6oXoUFuKVRZlShHYhdBsFQ
+/*
+import UIKit
+import CoreLocation
+import GoogleMaps
+
+// 主视图控制器，处理GPS实时监测、路径绘制及阈值区域检测
+class ViewController: UIViewController {
+
+    var mapView: GMSMapView!
+    let locationManager = CLLocationManager()
+    let apiKey = "AIzaSyDuq-bA6uuLX6oXoUFuKVRZlShHYhdBsFQ"
+
+    var points: [Point] = [] // 当前路径点数组
+    var threshold3Timer: Timer? // 阈值3定时器
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        GMSServices.provideAPIKey(apiKey)
+
+        setupMapView()
+        setupLocationManager()
+        fetchRouteAndDraw(from: "Maple Hall, University of Washington", to: "CSE Building, University of Washington")
+    }
+
+    // 初始化地图视图
+    private func setupMapView() {
+        let camera = GMSCameraPosition(latitude: 47.6553, longitude: -122.3035, zoom: 16.0)
+        
+        let options = GMSMapViewOptions()
+        options.camera = camera
+    
+        mapView = GMSMapView(options: options)
+        mapView.frame = view.bounds
+        view.addSubview(mapView)
+    }
+
+    // 配置位置管理器（GPS监测）
+    private func setupLocationManager() {
+        locationManager.delegate = self
+        locationManager.requestWhenInUseAuthorization()
+        locationManager.startUpdatingLocation()
+    }
+
+    // 请求Google Maps API获取并绘制路径（含阈值1和2的可视化）
+    private func fetchRouteAndDraw(from origin: String, to destination: String) {
+        GoogleMapsHelper.shared.fetchDirections(origin: origin, destination: destination, apiKey: apiKey) { polyline in
+            guard let polyline = polyline else { return }
+
+            DispatchQueue.main.async {
+                self.mapView.clear()
+                self.points = GoogleMapsHelper.shared.drawRouteWithThresholds(polyline: polyline, mapView: self.mapView)
+            }
+        }
+    }
+
+    // 实时检测用户的位置是否位于阈值1、阈值2或阈值3
+    private func checkUserPosition(_ userCoord: CLLocationCoordinate2D) {
+        var isInThreshold = false
+
+        for (index, point) in points.enumerated() {
+            let pointCoord = CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
+
+            // 阈值1（半径2米圆）
+            let distance = GoogleMapsHelper.shared.distanceInMeters(from: userCoord, to: pointCoord)
+            if distance <= 2.0 {
+                print("用户在阈值1, 路径点index:\(index), angle:\(point.angle ?? -1)")
+                isInThreshold = true
+                threshold3Timer?.invalidate()
+                threshold3Timer = nil
+                return
+            }
+
+            // 阈值2（平行四边形）
+            if index < points.count - 1 {
+                let nextPoint = points[index + 1]
+                let quad = GoogleMapsHelper.shared.createQuadrilateral(point1: point, point2: nextPoint)
+                if GoogleMapsHelper.shared.isPoint(userCoord, insideQuadrilateral: quad) {
+                    print("用户在阈值2, 路径点index:\(index), angle:\(point.angle ?? -1)")
+                    isInThreshold = true
+                    threshold3Timer?.invalidate()
+                    threshold3Timer = nil
+                    return
+                }
+            }
+        }
+
+        // 阈值3 (1秒防抖机制)
+        if !isInThreshold {
+            if threshold3Timer == nil {
+                threshold3Timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { _ in
+                    print("用户在阈值3，重新计算路径")
+                    if let destination = self.points.last {
+                        let destCoord = CLLocationCoordinate2D(latitude: destination.latitude, longitude: destination.longitude)
+                        self.fetchRouteAndDraw(from: "\(userCoord.latitude),\(userCoord.longitude)", to: "\(destCoord.latitude),\(destCoord.longitude)")
+                    }
+                    self.threshold3Timer = nil
+                }
+            }
+        }
+    }
+}
+
+// 实现GPS实时位置监测
+extension ViewController: CLLocationManagerDelegate {
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last else { return }
+        checkUserPosition(location.coordinate)
+    }
+}
+
+*/

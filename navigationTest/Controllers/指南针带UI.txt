@@ -1,0 +1,55 @@
+
+
+
+
+
+
+
+import UIKit
+import Combine
+
+class ViewController: UIViewController {
+
+    private var locationManager = LocationManager()
+    private var cancellables: Set<AnyCancellable> = []
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        // 订阅位置更新
+        locationManager.$currentLocation
+            .compactMap { $0 }
+            .sink { location in
+                print("当前位置：\(location.coordinate.latitude), \(location.coordinate.longitude)")
+            }
+            .store(in: &cancellables)
+
+        // 订阅指南针方向更新
+        locationManager.$currentHeading
+            .compactMap { $0 }
+            .sink { heading in
+                print("当前精准指南针方向: \(heading)°")
+            }
+            .store(in: &cancellables)
+
+        // 示例：计算距离
+        let pointA = Point(latitude: 40.0, longitude: -74.0)
+        let pointB = Point(latitude: 41.0, longitude: -75.0)
+        let distance = Functions.calculateDistance(from: pointA, to: pointB)
+        print("两点距离：\(distance)米")
+
+        // 示例：调用Google Maps API
+        GoogleMapsService.getLocationInfo(latitude: 40.0, longitude: -74.0, apiKey: "你的API密钥") { result in
+            switch result {
+            case .success(let response):
+                if let address = response.results.first?.formatted_address {
+                    print("Google Maps 地址：\(address)")
+                } else {
+                    print("未找到地址信息")
+                }
+            case .failure(let error):
+                print("获取地理信息失败：\(error.localizedDescription)")
+            }
+        }
+    }
+}

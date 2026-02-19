@@ -1,0 +1,237 @@
+Index: 0
+(latitude,longitude): 47.65596000000001 -122.31594000000001
+angle: 359.49297093892585°
+
+Index: 1
+(latitude,longitude): 47.655950000000004 -122.31481000000001
+angle: 0.0°
+
+Index: 2
+(latitude,longitude): 47.655950000000004 -122.31457
+angle: 270.0°
+
+Index: 3
+(latitude,longitude): 47.65592 -122.31457
+angle: 357.1375947749035°
+
+Index: 4
+(latitude,longitude): 47.655910000000006 -122.31437000000001
+angle: 0.0°
+
+Index: 5
+(latitude,longitude): 47.655910000000006 -122.31432000000001
+angle: 90.0°
+
+Index: 6
+(latitude,longitude): 47.655950000000004 -122.31432000000001
+angle: 0.0°
+
+Index: 7
+(latitude,longitude): 47.655950000000004 -122.31356000000001
+angle: 356.42366562373536°
+
+Index: 8
+(latitude,longitude): 47.65594 -122.31340000000002
+angle: 270.0°
+
+Index: 9
+(latitude,longitude): 47.6559 -122.31340000000002
+angle: 0.0°
+
+Index: 10
+(latitude,longitude): 47.6559 -122.31335000000001
+angle: 0.0°
+
+Index: 11
+(latitude,longitude): 47.6559 -122.31316000000001
+angle: 135.0°
+
+Index: 12
+(latitude,longitude): 47.655910000000006 -122.31317000000001
+angle: 0.0°
+
+Index: 13
+(latitude,longitude): 47.655910000000006 -122.31306000000001
+angle: 0.0°
+
+Index: 14
+(latitude,longitude): 47.655910000000006 -122.31275000000001
+angle: 341.56505117911354°
+
+Index: 15
+(latitude,longitude): 47.65589000000001 -122.31269
+angle: 358.0250659884411°
+
+Index: 16
+(latitude,longitude): 47.65588 -122.31240000000001
+angle: 355.91438322167835°
+
+Index: 17
+(latitude,longitude): 47.65587000000001 -122.31226000000001
+angle: 270.0°
+
+Index: 18
+(latitude,longitude): 47.655800000000006 -122.31226000000001
+angle: 268.3634229578852°
+
+Index: 19
+(latitude,longitude): 47.65545 -122.31227000000001
+angle: 270.0°
+
+Index: 20
+(latitude,longitude): 47.65543 -122.31227000000001
+angle: 0.0°
+
+Index: 21
+(latitude,longitude): 47.65543 -122.31222000000001
+angle: 2.1210963973306773°
+
+Index: 22
+(latitude,longitude): 47.655440000000006 -122.31195000000001
+angle: 270.0°
+
+Index: 23
+(latitude,longitude): 47.65543 -122.31195000000001
+angle: 356.82016988138844°
+
+Index: 24
+(latitude,longitude): 47.65542000000001 -122.31177000000001
+angle: 354.28940686088805°
+
+Index: 25
+(latitude,longitude): 47.65541 -122.31167
+angle: 338.8601751912731°
+
+Index: 26
+(latitude,longitude): 47.655120000000004 -122.31092000000001
+angle: 347.00538320842657°
+
+Index: 27
+(latitude,longitude): 47.655060000000006 -122.31066000000001
+angle: 347.47119229132744°
+
+Index: 28
+(latitude,longitude): 47.65504000000001 -122.31057000000001
+angle: 347.47119228917217°
+
+Index: 29
+(latitude,longitude): 47.655 -122.31039000000001
+angle: 307.8749836542298°
+
+Index: 30
+(latitude,longitude): 47.65491 -122.31032
+angle: 358.5679038163948°
+
+Index: 31
+(latitude,longitude): 47.654900000000005 -122.30992
+angle: 3.6913859863247125°
+
+Index: 32
+(latitude,longitude): 47.654920000000004 -122.30961
+angle: 304.9920201952799°
+
+Index: 33
+(latitude,longitude): 47.65482 -122.30954000000001
+angle: 19.983106523385786°
+
+Index: 34
+(latitude,longitude): 47.654860000000006 -122.30943
+angle: 17.744671624997846°
+
+Index: 35
+(latitude,longitude): 47.655100000000004 -122.30868000000001
+angle: 304.4608162710685°
+
+Index: 36
+(latitude,longitude): 47.65408 -122.30798000000001
+angle: 2.2025981623671513°
+
+Index: 37
+(latitude,longitude): 47.654090000000004 -122.30772
+angle: 340.70995377990454°
+
+Index: 38
+(latitude,longitude): 47.65402 -122.30752000000001
+angle: 317.29061004341895°
+
+Index: 39
+(latitude,longitude): 47.65390000000001 -122.30739000000001
+angle: 296.5650511716498°
+
+Index: 40
+(latitude,longitude): 47.65384 -122.30736000000002
+angle: 270.0°
+
+Index: 41
+(latitude,longitude): 47.65377 -122.30736000000002
+angle: 240.9453959070679°
+
+Index: 42
+(latitude,longitude): 47.65368 -122.30741
+angle: 305.2175929676286°
+
+Index: 43
+(latitude,longitude): 47.65334000000001 -122.30717000000001
+angle: 0.0°
+
+Index: 44
+(latitude,longitude): 47.65334000000001 -122.30703000000001
+angle: 326.3099324737355°
+
+Index: 45
+(latitude,longitude): 47.65312 -122.3067
+angle: 347.0053832099132°
+
+Index: 46
+(latitude,longitude): 47.653090000000006 -122.30657000000001
+angle: 353.290163192382°
+
+Index: 47
+(latitude,longitude): 47.65307000000001 -122.30640000000001
+angle: 337.7509763426435°
+
+Index: 48
+(latitude,longitude): 47.65298000000001 -122.30618000000001
+angle: 328.2405199135187°
+
+Index: 49
+(latitude,longitude): 47.65285 -122.30597000000002
+angle: 341.56505117911354°
+
+Index: 50
+(latitude,longitude): 47.65281 -122.30585
+angle: 0.0°
+
+Index: 51
+(latitude,longitude): 47.65281 -122.30574000000001
+angle: 18.43494882292201°
+
+Index: 52
+(latitude,longitude): 47.652820000000006 -122.30571
+angle: 45.0°
+
+Index: 53
+(latitude,longitude): 47.65285 -122.30568000000001
+angle: 333.43494883920647°
+
+Index: 54
+(latitude,longitude): 47.652840000000005 -122.30566
+angle: 346.75948008507976°
+
+Index: 55
+(latitude,longitude): 47.652800000000006 -122.30549
+angle: 54.78240703237142°
+
+Index: 56
+(latitude,longitude): 47.65297 -122.30537000000001
+angle: 52.43140796996177°
+
+Index: 57
+(latitude,longitude): 47.6531 -122.30527000000001
+angle: 90.0°
+
+Index: 58
+(latitude,longitude): 47.653110000000005 -122.30527000000001
+angle: nil
+
+'NSKeyedUnarchiveFromData' should not be used to for un-archiving and will be removed in a future release

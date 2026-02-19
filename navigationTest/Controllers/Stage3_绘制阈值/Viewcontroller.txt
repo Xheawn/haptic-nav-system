@@ -1,0 +1,133 @@
+//
+//  ViewController.swift
+//  navigation
+//
+//  Created by 殷雄 on 3/20/25.
+//
+//  AIzaSyDuq-bA6uuLX6oXoUFuKVRZlShHYhdBsFQ
+import UIKit
+import CoreLocation
+import GoogleMaps
+
+// 主视图控制器，包含GPS定位、指南针方向和地图导航功能
+class ViewController: UIViewController {
+
+    // 地图视图实例
+    var mapView: GMSMapView!
+    // Google Maps API Key
+    let apiKey = "AIzaSyDuq-bA6uuLX6oXoUFuKVRZlShHYhdBsFQ"
+    
+    // 起点可变，终点不变
+    // var origin = "Maple Hall, University of Washington, Seattle, WA"
+    var origin = "47.664639, -122.308286"
+    let destination = "CSE Building, University of Washington, Seattle, WA"
+
+    // 定位管理器，用于GPS和方向信息
+    let locationManager = CLLocationManager()
+
+    // 显示用户当前位置的标签
+    let locationLabel: UILabel = {
+        let label = UILabel()
+        label.text = "当前位置：获取中..."
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.backgroundColor = UIColor(white: 1, alpha: 0.8)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    // 显示用户设备朝向的标签
+    let headingLabel: UILabel = {
+        let label = UILabel()
+        label.text = "手机朝向：获取中..."
+        label.textAlignment = .center
+        label.backgroundColor = UIColor(white: 1, alpha: 0.8)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        setupMapView()
+        setupLocationManager()
+        setupLabels()
+        requestRoute(origin, destination)
+    }
+
+    // 初始化并配置地图视图
+    private func setupMapView() {
+        GMSServices.provideAPIKey(apiKey)
+        let camera = GMSCameraPosition(latitude: 47.6553, longitude: -122.3035, zoom: 15.0)
+        let options = GMSMapViewOptions()
+        options.camera = camera
+
+        mapView = GMSMapView(options: options)
+        mapView.frame = view.bounds
+        view.addSubview(mapView)
+    }
+
+    // 配置定位管理器，并开始定位和方向监测
+    private func setupLocationManager() {
+        locationManager.delegate = self
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.requestWhenInUseAuthorization()
+        locationManager.startUpdatingLocation()
+
+        if CLLocationManager.headingAvailable() {
+            locationManager.startUpdatingHeading()
+        } else {
+            headingLabel.text = "设备不支持方向功能"
+        }
+    }
+
+    // 添加并布局显示定位和方向信息的标签
+    private func setupLabels() {
+        view.addSubview(locationLabel)
+        view.addSubview(headingLabel)
+
+        NSLayoutConstraint.activate([
+            locationLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
+            locationLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            locationLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+
+            headingLabel.topAnchor.constraint(equalTo: locationLabel.bottomAnchor, constant: 10),
+            headingLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            headingLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+        ])
+    }
+
+    // 发起路线请求（使用GoogleMapsHelper处理）
+    private func requestRoute(_ origin: String, _ destination: String) {
+        GoogleMapsHelper.shared.fetchDirections(
+            origin: origin,
+            destination: destination,
+            apiKey: apiKey
+        ) { [weak self] polyline in
+            guard let polyline = polyline, let self = self else { return }
+            DispatchQueue.main.async {
+                GoogleMapsHelper.shared.drawRouteOnMap(polyline: polyline, mapView: self.mapView)
+            }
+        }
+    }
+}
+
+// CLLocationManagerDelegate协议实现，负责位置和方向更新
+extension ViewController: CLLocationManagerDelegate {
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let currentLocation = locations.last else { return }
+        locationLabel.text = "当前位置：\n纬度：\(currentLocation.coordinate.latitude)\n经度：\(currentLocation.coordinate.longitude)"
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+        headingLabel.text = "手机朝向：\(newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading)°"
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        locationLabel.text = "定位错误：\(error.localizedDescription)"
+    }
+}
+
+
+

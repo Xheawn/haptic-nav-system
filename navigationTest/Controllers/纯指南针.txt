@@ -1,0 +1,50 @@
+
+
+
+
+
+
+
+import UIKit
+import CoreLocation
+
+class ViewController: UIViewController, CLLocationManagerDelegate {
+
+    // 初始化位置管理器
+    let locationManager = CLLocationManager()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        // 设置位置管理器
+        locationManager.delegate = self
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+
+        // 请求用户位置权限
+        locationManager.requestWhenInUseAuthorization()
+
+        // 检查设备是否支持指南针功能
+        if CLLocationManager.headingAvailable() {
+            locationManager.headingFilter = kCLHeadingFilterNone
+            locationManager.startUpdatingHeading()
+        } else {
+            print("设备不支持指南针功能")
+        }
+    }
+
+    // 实时获取指南针数据
+    func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+        let magneticHeading = newHeading.magneticHeading // 磁北（常用）
+        let trueHeading = newHeading.trueHeading // 真北（需要GPS信号）
+
+        print("磁北方位: \(magneticHeading)°")
+        print("真北方位: \(trueHeading)°")
+        
+        // 这里可以更新界面UI，比如显示到Label或旋转一个指南针图片
+    }
+
+    // 错误处理
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        print("获取方向失败: \(error.localizedDescription)")
+    }
+}

@@ -1,0 +1,111 @@
+import UIKit
+import GoogleMaps
+
+/// Google Maps 辅助类（处理路线获取和地图绘制功能）
+class GoogleMapsHelper {
+
+    /// 单例模式（确保全局唯一实例）
+    static let shared = GoogleMapsHelper()
+
+    private init() {} // 私有化构造方法
+
+    /// 通过Google Directions API获取路径数据
+    /// - Parameters:
+    ///   - origin: 起点地址
+    ///   - destination: 终点地址
+    ///   - apiKey: Google Maps API 密钥
+    ///   - completion: 完成时的回调，返回polyline字符串
+    func fetchDirections(origin: String, destination: String, apiKey: String, completion: @escaping (String?) -> Void) {
+        let originEncoded = origin.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!
+        let destinationEncoded = destination.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!
+        let directionsURL = "https://maps.googleapis.com/maps/api/directions/json?origin=\(originEncoded)&destination=\(destinationEncoded)&mode=walking&key=\(apiKey)"
+
+        URLSession.shared.dataTask(with: URL(string: directionsURL)!) { (data, response, error) in
+            guard let data = data, error == nil else {
+                print("请求失败：", error ?? "")
+                completion(nil)
+                return
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                   let routes = json["routes"] as? [[String: Any]],
+                   let route = routes.first,
+                   let overviewPolyline = route["overview_polyline"] as? [String: Any],
+                   let points = overviewPolyline["points"] as? String {
+                    completion(points)
+                } else {
+                    print("未找到有效路线数据")
+                    completion(nil)
+                }
+            } catch {
+                print("JSON解析失败：", error)
+                completion(nil)
+            }
+        }.resume()
+    }
+
+    /// 在地图上绘制路径并创建带有角度信息的坐标点
+    /// - Parameters:
+    ///   - polyline: Google Directions API返回的编码后的路径信息
+    ///   - mapView: 需要绘制路径的地图视图
+    func drawRouteOnMap(polyline: String, mapView: GMSMapView) {
+        guard let path = GMSPath(fromEncodedPath: polyline) else {
+            print("路径解析失败")
+            return
+        }
+
+        // 创建并绘制路径线
+        let routeLine = GMSPolyline(path: path)
+        routeLine.strokeWidth = 5.0
+        routeLine.strokeColor = .systemBlue
+        routeLine.map = mapView
+
+        // 自动调整地图视图范围以完全显示路径
+        let bounds = GMSCoordinateBounds(path: path)
+        let update = GMSCameraUpdate.fit(bounds, withPadding: 50)
+        mapView.animate(with: update)
+
+        // 存储带有角度的路径点
+        var points: [Point] = []
+
+        // 遍历路径上的所有坐标点
+        for index in 0..<Int(path.count()) {
+            let coordinate = path.coordinate(at: UInt(index))
+            let point = Point(index: index, latitude: coordinate.latitude, longitude: coordinate.longitude)
+
+            // 为每个点计算指向下一个点的角度（最后一个点无角度）
+            if index < Int(path.count()) - 1 {
+                let nextCoordinate = path.coordinate(at: UInt(index + 1))
+                let angle = calculateAngle(from: coordinate, to: nextCoordinate)
+                point.setAngle(angle)
+            } else {
+                point.setAngle(nil)
+            }
+
+            points.append(point)
+
+            // 打印详细坐标点信息（包括角度）
+            print(point)
+        }
+    }
+
+    /// 计算两个坐标之间的角度，以正X轴为0°，逆时针为正
+    /// - Parameters:
+    ///   - start: 起始点经纬度
+    ///   - end: 终点经纬度
+    /// - Returns: 角度值（单位：度）
+    private func calculateAngle(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) -> Double {
+        let deltaX = end.longitude - start.longitude
+        let deltaY = end.latitude - start.latitude
+        let radians = atan2(deltaY, deltaX)
+        var degrees = radians * (180.0 / .pi)
+
+        // 标准化角度到0-360°
+        if degrees < 0 {
+            degrees += 360
+        }
+
+        return degrees
+    }
+}

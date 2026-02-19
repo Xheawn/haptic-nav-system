@@ -2,6 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>This app needs to connect to your wearable to provide haptic navigation guidance.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>This app uses the camera and LiDAR sensor to detect obstacles for safe navigation.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>应用需要在后台持续获取您的位置信息</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>本应用需要使用你的位置信息来实现导航功能</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

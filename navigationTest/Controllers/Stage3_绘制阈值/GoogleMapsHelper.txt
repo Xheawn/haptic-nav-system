@@ -1,0 +1,184 @@
+//
+//  GoogleMapsHelper.swift
+//  navigation
+//
+//  Created by 殷雄 on 3/26/25.
+//
+
+import UIKit
+import GoogleMaps
+
+/// Google Maps 辅助类（处理路线获取和地图绘制功能）
+class GoogleMapsHelper {
+
+    /// 单例模式（确保全局唯一实例）
+    static let shared = GoogleMapsHelper()
+
+    private init() {} // 私有化构造方法
+
+    /// 通过Google Directions API获取路径数据
+    /// - Parameters:
+    ///   - origin: 起点地址
+    ///   - destination: 终点地址
+    ///   - apiKey: Google Maps API 密钥
+    ///   - completion: 完成时的回调，返回polyline字符串
+    func fetchDirections(origin: String, destination: String, apiKey: String, completion: @escaping (String?) -> Void) {
+        let originEncoded = origin.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!
+        let destinationEncoded = destination.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!
+        let directionsURL = "https://maps.googleapis.com/maps/api/directions/json?origin=\(originEncoded)&destination=\(destinationEncoded)&mode=walking&key=\(apiKey)"
+
+        URLSession.shared.dataTask(with: URL(string: directionsURL)!) { (data, response, error) in
+            guard let data = data, error == nil else {
+                print("请求失败：", error ?? "")
+                completion(nil)
+                return
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                   let routes = json["routes"] as? [[String: Any]],
+                   let route = routes.first,
+                   let overviewPolyline = route["overview_polyline"] as? [String: Any],
+                   let points = overviewPolyline["points"] as? String {
+                    completion(points)
+                } else {
+                    print("未找到有效路线数据")
+                    completion(nil)
+                }
+            } catch {
+                print("JSON解析失败：", error)
+                completion(nil)
+            }
+        }.resume()
+    }
+
+    /// 在地图上绘制路径并创建带有角度信息的坐标点
+    /// - Parameters:
+    ///   - polyline: Google Directions API返回的编码后的路径信息
+    ///   - mapView: 需要绘制路径的地图视图
+    func drawRouteOnMap(polyline: String, mapView: GMSMapView) {
+        guard let path = GMSPath(fromEncodedPath: polyline) else {
+            print("路径解析失败")
+            return
+        }
+
+        // 清空地图上原有的绘制
+        mapView.clear()
+
+        // 绘制路径线
+        let routeLine = GMSPolyline(path: path)
+        routeLine.strokeWidth = 5.0
+        routeLine.strokeColor = .systemBlue
+        routeLine.map = mapView
+
+        // 自动调整地图视图范围
+        let bounds = GMSCoordinateBounds(path: path)
+        let update = GMSCameraUpdate.fit(bounds, withPadding: 50)
+        mapView.animate(with: update)
+
+        // 存储路径点
+        var points: [Point] = []
+
+        for index in 0..<Int(path.count()) {
+            let coordinate = path.coordinate(at: UInt(index))
+            let point = Point(index: index, latitude: coordinate.latitude, longitude: coordinate.longitude)
+
+            // 计算指向下一个点的角度
+            if index < Int(path.count()) - 1 {
+                let nextCoordinate = path.coordinate(at: UInt(index + 1))
+                let angle = calculateAngle(from: coordinate, to: nextCoordinate)
+                point.setAngle(angle)
+
+                // 阈值2 (黄色平行四边形区域绘制)
+                drawThreshold2(from: coordinate, to: nextCoordinate, mapView: mapView)
+            } else {
+                point.setAngle(nil)
+            }
+
+            points.append(point)
+
+            // 阈值1（绿色圆圈区域绘制）
+            let threshold1Circle = GMSCircle(position: coordinate, radius: 2.0)
+            threshold1Circle.strokeColor = UIColor.green.withAlphaComponent(0.8)
+            threshold1Circle.strokeWidth = 2
+            threshold1Circle.fillColor = UIColor.green.withAlphaComponent(0.3)
+            threshold1Circle.map = mapView
+
+            // 打印点的信息
+            print(point)
+        }
+    }
+    
+    // 根据距离和方位角计算新坐标
+    // 绘制阈值2的平行四边形区域
+    private func coordinate(from coord: CLLocationCoordinate2D, distanceMeters: Double, bearingDegrees: Double) -> CLLocationCoordinate2D {
+        let earthRadius = 6378137.0
+        let bearingRad = bearingDegrees * .pi / 180.0
+        let lat1 = coord.latitude * .pi / 180.0
+        let lon1 = coord.longitude * .pi / 180.0
+
+        let lat2 = asin(sin(lat1) * cos(distanceMeters / earthRadius) +
+                        cos(lat1) * sin(distanceMeters / earthRadius) * cos(bearingRad))
+        let lon2 = lon1 + atan2(sin(bearingRad) * sin(distanceMeters / earthRadius) * cos(lat1),
+                                cos(distanceMeters / earthRadius) - sin(lat1) * sin(lat2))
+
+        return CLLocationCoordinate2D(latitude: lat2 * 180.0 / .pi, longitude: lon2 * 180.0 / .pi)
+    }
+
+    // 使用CoreLocation实现精确绘制阈值2（黄色平行四边形区域），不再依赖GoogleMapsUtils
+    private func drawThreshold2(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D, mapView: GMSMapView) {
+        let halfWidth = 2.0 // 平行四边形半宽 (总宽度4米)
+        
+        // 使用CoreLocation准确计算方位角
+        let deltaLong = end.longitude - start.longitude
+        let y = sin(deltaLong * .pi / 180) * cos(end.latitude * .pi / 180)
+        let x = cos(start.latitude * .pi / 180) * sin(end.latitude * .pi / 180) -
+                sin(start.latitude * .pi / 180) * cos(end.latitude * .pi / 180) * cos(deltaLong * .pi / 180)
+        let bearingRad = atan2(y, x)
+        let bearingDegrees = (bearingRad * 180 / .pi + 360).truncatingRemainder(dividingBy: 360)
+        
+        let perpendicularBearing1 = bearingDegrees + 90
+        let perpendicularBearing2 = bearingDegrees - 90
+        
+        // 起点左右两侧坐标
+        let startLeft = coordinate(from: start, distanceMeters: halfWidth, bearingDegrees: perpendicularBearing1)
+        let startRight = coordinate(from: start, distanceMeters: halfWidth, bearingDegrees: perpendicularBearing2)
+        
+        // 终点左右两侧坐标
+        let endLeft = coordinate(from: end, distanceMeters: halfWidth, bearingDegrees: perpendicularBearing1)
+        let endRight = coordinate(from: end, distanceMeters: halfWidth, bearingDegrees: perpendicularBearing2)
+        
+        // 构造路径绘制平行四边形
+        let path = GMSMutablePath()
+        path.add(startLeft)
+        path.add(endLeft)
+        path.add(endRight)
+        path.add(startRight)
+        
+        let polygon = GMSPolygon(path: path)
+        polygon.strokeColor = UIColor.yellow.withAlphaComponent(0.8)
+        polygon.strokeWidth = 2
+        polygon.fillColor = UIColor.yellow.withAlphaComponent(0.3)
+        polygon.map = mapView
+    }
+
+    /// 计算两个坐标之间的角度，以正X轴为0°，逆时针为正
+    /// - Parameters:
+    ///   - start: 起始点经纬度
+    ///   - end: 终点经纬度
+    /// - Returns: 角度值（单位：度）
+    private func calculateAngle(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) -> Double {
+        let deltaX = end.longitude - start.longitude
+        let deltaY = end.latitude - start.latitude
+        let radians = atan2(deltaY, deltaX)
+        var degrees = radians * (180.0 / .pi)
+
+        // 标准化角度到0-360°
+        if degrees < 0 {
+            degrees += 360
+        }
+
+        return degrees
+    }
+}
+

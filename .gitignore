@@ -1,0 +1,25 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+xcuserdata/
+
+# CocoaPods
+Pods/
+
+# SPM
+.build/
+Package.resolved
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# R
+.Rhistory
+
+# Windsurf
+.windsurf/

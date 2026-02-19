@@ -1,0 +1,89 @@
+
+import UIKit
+import CoreLocation
+
+class ViewController: UIViewController {
+
+    let locationManager = CLLocationManager()
+    
+    // 显示位置的Label
+    let locationLabel: UILabel = {
+        let label = UILabel()
+        label.text = "当前位置：获取中..."
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    // 显示朝向的Label
+    let headingLabel: UILabel = {
+        let label = UILabel()
+        label.text = "手机朝向：获取中..."
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        view.backgroundColor = .white
+
+        // 设置locationManager
+        locationManager.delegate = self
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.requestWhenInUseAuthorization()
+        locationManager.startUpdatingLocation()
+
+        // 检测并启动方向更新
+        if CLLocationManager.headingAvailable() {
+            locationManager.startUpdatingHeading()
+        } else {
+            headingLabel.text = "设备不支持方向功能"
+        }
+
+        // 添加UI组件到视图
+        view.addSubview(locationLabel)
+        view.addSubview(headingLabel)
+
+        // 设置约束
+        NSLayoutConstraint.activate([
+            locationLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            locationLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -30),
+            locationLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            locationLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+
+            headingLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            headingLabel.topAnchor.constraint(equalTo: locationLabel.bottomAnchor, constant: 20),
+            headingLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            headingLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+        ])
+    }
+}
+
+// MARK: - CLLocationManagerDelegate 实现
+extension ViewController: CLLocationManagerDelegate {
+
+    // 更新位置信息
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let currentLocation = locations.last else { return }
+
+        let latitude = String(format: "%.5f", currentLocation.coordinate.latitude)
+        let longitude = String(format: "%.5f", currentLocation.coordinate.longitude)
+
+        locationLabel.text = "当前位置：\n纬度：\(latitude)\n经度：\(longitude)"
+    }
+
+    // 更新手机朝向信息
+    func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+        let heading = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
+        let formattedHeading = String(format: "%.1f", heading)
+        headingLabel.text = "手机朝向：\(formattedHeading)°"
+    }
+
+    // 处理错误
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        locationLabel.text = "定位错误：\(error.localizedDescription)"
+    }
+}

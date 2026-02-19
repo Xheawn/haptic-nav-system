@@ -1,0 +1,87 @@
+//
+//  ViewController.swift
+//  navigation
+//
+//  Created by 殷雄 on 3/20/25.
+//
+//  AIzaSyDuq-bA6uuLX6oXoUFuKVRZlShHYhdBsFQ
+import UIKit
+import GoogleMaps
+
+class ViewController: UIViewController {
+
+    var mapView: GMSMapView!
+    let apiKey = "AIzaSyDuq-bA6uuLX6oXoUFuKVRZlShHYhdBsFQ"
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        GMSServices.provideAPIKey(apiKey)
+
+        // 初始化地图
+        let camera = GMSCameraPosition(latitude: 47.6553, longitude: -122.3035, zoom: 15.0)
+        let options = GMSMapViewOptions()
+        options.camera = camera
+
+        mapView = GMSMapView(options: options)
+        mapView.frame = view.bounds
+        view.addSubview(mapView)
+
+        fetchDirections(origin: "Maple Hall, University of Washington, Seattle, WA",
+                        destination: "CSE Building, University of Washington, Seattle, WA")
+    }
+
+    func fetchDirections(origin: String, destination: String) {
+        let originEncoded = origin.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!
+        let destinationEncoded = destination.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!
+        let directionsURL = "https://maps.googleapis.com/maps/api/directions/json?origin=\(originEncoded)&destination=\(destinationEncoded)&mode=walking&key=\(apiKey)"
+
+        URLSession.shared.dataTask(with: URL(string: directionsURL)!) { (data, response, error) in
+            guard let data = data, error == nil else {
+                print("请求失败：", error ?? "")
+                return
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                   let routes = json["routes"] as? [[String: Any]],
+                   let route = routes.first,
+                   let overviewPolyline = route["overview_polyline"] as? [String: Any],
+                   let points = overviewPolyline["points"] as? String {
+
+                    DispatchQueue.main.async {
+                        self.drawRouteOnMap(polyline: points)
+                    }
+                } else {
+                    print("未找到有效路线数据")
+                }
+            } catch {
+                print("JSON解析失败：", error)
+            }
+        }.resume()
+    }
+
+    func drawRouteOnMap(polyline: String) {
+        guard let path = GMSPath(fromEncodedPath: polyline) else {
+            print("路径解析失败")
+            return
+        }
+
+        let routeLine = GMSPolyline(path: path)
+        routeLine.strokeWidth = 5.0
+        routeLine.strokeColor = .systemBlue
+        routeLine.map = mapView
+
+        let bounds = GMSCoordinateBounds(path: path)
+        let update = GMSCameraUpdate.fit(bounds, withPadding: 50)
+        mapView.animate(with: update)
+
+        // 打印路径上的每个经纬度坐标
+        print("路径上的坐标点如下：")
+        for index in 0..<path.count() {
+            let coordinate = path.coordinate(at: index)
+            print("第\(index + 1)点: 纬度,经度： \(coordinate.latitude), \(coordinate.longitude)")
+        }
+    }
+}
+
