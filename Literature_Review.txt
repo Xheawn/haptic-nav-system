@@ -1,0 +1,433 @@
+================================================================================
+LITERATURE REVIEW — Haptic Navigation System for Visually Impaired Users
+================================================================================
+Compiled: Feb 19, 2026
+Project: haptic-nav-system (iOS ARKit LiDAR + ESP32-S3 BLE haptic feedback)
+
+Purpose: Identify methods, techniques, and design insights from related work
+that can improve our system's obstacle detection (B2), navigation arbitration
+(Step 3), haptic encoding (Step 4), and overall user experience.
+
+================================================================================
+PAPER 1
+================================================================================
+Title:   Characterizing and Predicting Engagement of Blind and Low-Vision
+         People with an Audio-Based Navigation App
+Authors: Liu, Hernandez, Gonzalez-Franco, Maselli, Ofek, Lindeman, Cutrell
+Venue:   CHI 2022 (Late Breaking Work)
+DOI:     10.1145/3491101.3519862
+Source:  Microsoft Research (Soundscape project)
+
+SUMMARY:
+Studied engagement patterns of 4,700+ blind/low-vision (BLV) users of Microsoft
+Soundscape, an audio-based navigation app that provides 3D spatial audio cues
+for outdoor wayfinding. Used machine learning models to characterize and predict
+user engagement over time.
+
+KEY METHODS & FINDINGS:
+- Engagement metrics: session frequency, duration, feature usage patterns
+- ML models (Random Forest, XGBoost) predict which users will remain engaged
+- Identified key engagement features: frequency of "set audio beacon" usage,
+  exploration vs. commute mode, and time-of-day patterns
+- Users who explored the app's spatial audio callouts in the first few sessions
+  were more likely to become long-term users
+- 3D spatial audio cues (binaural audio) significantly improved spatial awareness
+
+RELEVANCE TO OUR PROJECT:
+- **User engagement insight**: simple, reliable feedback in early use is critical
+  for adoption — our haptic feedback must be immediately understandable
+- **Multimodal feedback**: Soundscape uses audio; we use haptic. Both benefit
+  from directional encoding (left/right intensity mapping)
+- **Design principle**: allow users to toggle between exploration mode and
+  navigation mode — consider adding a "scan mode" for LiDAR-only exploration
+- **Metric**: track vibration response accuracy as engagement metric
+
+================================================================================
+PAPER 2
+================================================================================
+Title:   All the Way There and Back: Inertial-Based, Phone-in-Pocket Indoor
+         Wayfinding and Backtracking Apps for Blind Travelers
+Authors: Tsai, Elyasi, Ren, Manduchi
+Venue:   ACM Transactions on Accessible Computing, 2024
+DOI:     10.1145/3696005
+
+SUMMARY:
+Two iOS apps for indoor navigation using only inertial and magnetic sensors
+(accelerometer, gyroscope, magnetometer) — no camera, no BLE beacons, no
+infrastructure modifications. Users keep phone in pocket and interact via
+Apple Watch. Wayfinding follows pre-mapped routes; Backtracking records and
+reverses the user's path.
+
+KEY METHODS & FINDINGS:
+- **Pedestrian Dead Reckoning (PDR)**: step detection + step length estimation
+  + heading from magnetometer/gyroscope fusion
+- **Heading correction**: uses known corridor orientations from floor plan to
+  correct magnetometer drift via particle filter
+- **Turn detection**: gyroscope-based angular velocity spike detection
+- **Phone-in-pocket**: works without holding the phone — significant UX
+  advantage for blind users who need both hands free (white cane + guide dog)
+- **Smartwatch as UI**: Apple Watch provides speech output + haptic taps for
+  turn-by-turn directions
+- **Backtracking**: records inertial trace, then reverses it with inverted
+  left/right instructions
+- Tested with 7 blind participants: high task completion rate, low deviation
+
+RELEVANCE TO OUR PROJECT:
+- **Smartwatch as haptic output**: we currently use ESP32 wristband, but Apple
+  Watch's built-in haptic engine could be a future alternative/supplement
+- **Phone-in-pocket paradigm**: our system requires phone in hand for LiDAR,
+  but for GPS-only macro navigation, pocket mode could work
+- **Heading estimation**: their PDR heading correction method could supplement
+  our compass heading for more stable direction estimation indoors
+- **Turn instruction format**: they use clock-face directions (e.g., "2 o'clock")
+  — we could encode similar directional granularity in haptic patterns
+- **Backtracking feature**: useful for our users — record outbound route and
+  provide haptic guidance for return trip
+
+================================================================================
+PAPER 3
+================================================================================
+Title:   A Smartphone-Based Mobility Assistant Using Depth Imaging for
+         Visually Impaired and Blind
+Authors: See, Sasing, Advincula
+Venue:   Applied Sciences 12(6):2802, 2022
+DOI:     10.3390/app12062802
+
+SUMMARY:
+A smartphone app using the phone's depth camera (TrueDepth/LiDAR) to detect
+obstacles. Samples depth values from 23 specific coordinate points in the depth
+frame and analyzes them to determine obstacle presence and approximate distance.
+Audio feedback alerts the user.
+
+KEY METHODS & FINDINGS:
+- **23-point depth sampling**: instead of processing the entire depth buffer,
+  samples depth at 23 strategically placed coordinates covering left, center,
+  and right regions at multiple heights
+- **Zone-based detection**: divides the field of view into 3 horizontal zones
+  (left, center, right) and 3 vertical zones (upper, middle, lower)
+- **Threshold-based classification**: obstacles classified by distance into
+  danger levels with corresponding audio alerts
+- **Smartphone-only**: no additional hardware required
+- Tested with VIB participants: 93% obstacle detection accuracy for objects
+  within 2m range
+- Usability evaluation showed high satisfaction scores (SUS > 80)
+
+RELEVANCE TO OUR PROJECT:
+- **Sparse sampling strategy**: our 16×16 grid (256 cells) is much denser than
+  their 23 points — validates that even sparse depth sampling works well
+- **Zone-based approach**: their left/center/right zones map directly to our
+  haptic left/right motor encoding
+- **Validation**: confirms smartphone depth cameras are viable for real-time
+  obstacle detection for BLV users
+- **Audio complement**: they use audio; we use haptic — consider adding
+  optional audio cues for critical hazards (e.g., staircase warning)
+- **Our advantage**: our 16×16 grid with percentile-10 provides much higher
+  spatial resolution and noise robustness than 23 discrete points
+
+================================================================================
+PAPER 4
+================================================================================
+Title:   MAIDR Meets AI: Exploring Multimodal LLM-Based Data Visualization
+         Interpretation by and with Blind and Low-Vision Users
+Authors: (Various)
+Venue:   ASSETS 2024
+DOI:     10.1145/3663548.3675660
+
+NOTE: This paper is about accessible data visualization using LLMs, NOT about
+haptic navigation or obstacle detection. It explores how blind users interact
+with charts/graphs through multimodal AI descriptions. While not directly
+applicable to our obstacle detection pipeline, it offers insights on accessible
+interface design.
+
+RELEVANCE TO OUR PROJECT:
+- **Multimodal accessibility**: reinforces the principle that information should
+  be conveyed through multiple channels (our system: haptic + optional audio)
+- **User-centered design**: emphasizes involving BLV users in design iteration
+- Limited direct technical applicability to our obstacle detection system
+
+================================================================================
+PAPER 5
+================================================================================
+Title:   A Lightweight Approach to Localization for Blind and Visually
+         Impaired Travelers
+Authors: Crabb, Cheraghi, Coughlan
+Venue:   Sensors 23(5):2701, 2023
+DOI:     10.3390/s23052701
+
+SUMMARY:
+Proposes a lightweight indoor localization system for BVI travelers that does
+not require infrastructure modifications (no beacons, no WiFi fingerprinting).
+Uses visual features from the phone camera combined with inertial sensors
+to estimate position within a building.
+
+KEY METHODS & FINDINGS:
+- **Visual-inertial odometry**: combines camera feature tracking with IMU data
+  for position estimation
+- **Lightweight design**: runs on standard smartphones without cloud processing
+- **No infrastructure requirement**: unlike BLE beacon systems, works in any
+  building without pre-installed hardware
+- **Map matching**: aligns estimated trajectory to known floor plan geometry
+  to correct drift
+- Designed specifically for accessibility — tested with BVI participants
+
+RELEVANCE TO OUR PROJECT:
+- **Indoor localization**: our system currently relies on Google Maps GPS which
+  fails indoors — this paper's approach could extend our system to indoor venues
+- **Visual-inertial fusion**: ARKit already does visual-inertial odometry;
+  we could leverage ARKit's world tracking for indoor position estimation
+- **Map matching for drift correction**: useful concept for improving heading
+  accuracy in our navigation pipeline
+- **Complement to our LiDAR**: LiDAR handles micro-level obstacles while
+  this approach handles macro-level positioning
+
+================================================================================
+PAPER 6
+================================================================================
+Title:   (Could not retrieve — DOI 10.1145/3308561.3353788 from ASSETS 2019
+         proceedings could not be resolved to a specific paper title through
+         available search channels)
+Venue:   ASSETS 2019
+DOI:     10.1145/3308561.3353788
+
+NOTE: This DOI falls within the ASSETS 2019 conference proceedings
+(10.1145/3308561). The ASSETS conference focuses on computing and accessibility.
+Unable to retrieve the specific paper content. If this was intended to reference
+the haptic feedback sleeve paper (Zuschlag et al., arXiv:2201.04453), see the
+supplementary entry below.
+
+--- SUPPLEMENTARY: Haptic Feedback Sleeve (likely intended reference) ---
+Title:   Obstacle Avoidance for Blind People Using a 3D Camera and a Haptic
+         Feedback Sleeve
+Authors: Zuschlag et al.
+Venue:   arXiv:2201.04453, 2022
+
+SUMMARY:
+Combines an Intel RealSense 3D depth camera with a haptic feedback sleeve worn
+on the forearm. The depth image is mapped onto a 2D array of vibration motors,
+giving the user a spatial "image" of obstacles through touch.
+
+KEY METHODS & FINDINGS:
+- **Depth-to-vibration mapping**: depth camera output → 2D vibration motor grid
+  on the forearm sleeve
+- **Motor array layout**: multiple vibration motors arranged in rows and columns
+  on the forearm; closer obstacles = stronger vibration
+- **Single motor recognition**: 98.6% accuracy for identifying single motor
+  vibration patterns
+- **Multi-motor recognition**: 70% accuracy for multidirectional patterns
+- **Lighting independence**: works in complete darkness (infrared depth camera)
+- **User testing**: all participants completed obstacle course in the dark;
+  performance improved over multiple runs
+
+RELEVANCE TO OUR PROJECT:
+- **Direct analog**: our system uses 2 motors (left/right wrist); they use a
+  full 2D array — demonstrates that spatial haptic mapping works
+- **Depth-to-vibration pipeline**: validates our approach of converting depth
+  grid data into motor intensity
+- **Key insight**: even with only 2 motors, we can encode left/right obstacle
+  direction + intensity proportional to proximity
+- **Multi-motor patterns**: if we expand to more motors, their 2D array
+  paradigm shows how to map grid columns to motor positions
+- **Performance improves with practice**: important for user study design —
+  users need training period
+
+================================================================================
+PAPER 7
+================================================================================
+Title:   Assisting the Visually Impaired: Obstacle Detection and Warning
+         System by Acoustic Feedback
+Authors: Rodriguez, Mallofré, Andrade
+Venue:   Sensors 12(12):17476-17496, 2012
+DOI:     10.3390/s121217476
+
+SUMMARY:
+A stereo camera-based obstacle detection system that computes dense disparity
+maps, estimates the ground plane using RANSAC, and represents obstacles in a
+polar grid for acoustic feedback to visually impaired users.
+
+KEY METHODS & FINDINGS:
+- **Dense disparity map**: computed from stereo camera pair using block matching
+- **RANSAC ground plane estimation**:
+  1. Randomly sample 3 points from the disparity map
+  2. Fit a plane equation: ax + by + cz = d
+  3. Count inliers (points within distance threshold of plane)
+  4. Repeat N iterations; keep best plane
+  5. Apply temporal filtering (exponential moving average) across frames
+     to smooth the ground plane estimate
+- **U-disparity and V-disparity**: column and row histograms of disparity map
+  used to quickly identify ground plane and vertical obstacles
+- **Polar grid representation**:
+  - Divide the scene into angular sectors (columns) and distance rings (rows)
+  - Each cell stores occupancy status
+  - Efficient for representing "what is where" relative to the user
+  - Natural mapping to directional feedback (angle → left/right)
+- **Acoustic feedback**: sonification of obstacle grid — pitch encodes distance,
+  stereo panning encodes direction
+- Works in both indoor and outdoor scenarios
+- Real-time processing on embedded hardware
+
+RELEVANCE TO OUR PROJECT:
+*** HIGHLY RELEVANT — multiple methods directly applicable ***
+- **RANSAC ground plane**: we can implement a lightweight version using our
+  16×16 depth grid. With 256 depth values + ARKit's camera pose, we can fit
+  a ground plane and classify above-ground (obstacle) vs. ground (safe).
+  This solves the "false positive on flat ground" problem.
+- **Polar grid**: our 16×16 Cartesian grid could be converted to a polar
+  representation centered on the user — angular sectors map directly to
+  left/right haptic motors
+- **Temporal filtering**: apply exponential moving average to our depth grid
+  across frames to reduce noise and flickering
+- **U-disparity concept**: summing depth values per column gives a quick
+  "obstacle density per direction" metric — directly useful for deciding
+  left vs. right motor intensity
+- **Distance rings**: map depth grid rows to distance bands; closest band
+  triggers strongest haptic response
+
+================================================================================
+PAPER 8
+================================================================================
+Title:   An Indoor Obstacle Detection System Using Depth Information and
+         Region Growing
+Authors: Huang, Hsieh, Yeh
+Venue:   Sensors 15(10):27116-27141, 2015
+DOI:     10.3390/s151027116
+
+SUMMARY:
+Uses a Microsoft Kinect depth sensor for indoor obstacle detection. Key
+innovation is the combination of RANSAC-based floor removal with region growing
+to segment and identify individual obstacles.
+
+KEY METHODS & FINDINGS:
+- **Depth image acquisition**: Kinect depth sensor (640×480 depth map)
+- **RANSAC floor plane removal**:
+  1. Estimate floor plane from depth image using RANSAC
+  2. Remove all points belonging to the floor plane
+  3. Remaining points are candidate obstacles
+  - Critical insight: floor and obstacle junctions have similar depth values,
+    making simple thresholding insufficient — must explicitly remove ground
+- **Region growing segmentation**:
+  1. After floor removal, seed points are placed on remaining depth regions
+  2. Region growing expands seeds by adding neighboring pixels with similar
+     depth values (within a threshold)
+  3. Each grown region = one obstacle
+  4. Small regions are filtered out as noise
+- **Connected component labeling**: alternative to region growing for grouping
+  obstacle pixels, but less effective at boundaries
+- **Bounding box extraction**: each segmented obstacle gets a bounding box
+  with estimated position and size
+- **Vocal announcement**: text-to-speech feedback describing obstacle location
+  (e.g., "obstacle on your left, 1.5 meters")
+
+RELEVANCE TO OUR PROJECT:
+*** HIGHLY RELEVANT — floor removal + obstacle segmentation ***
+- **Floor removal is essential**: confirms that simple depth thresholding is
+  insufficient — the floor appears as a "close" object in the lower portion
+  of the depth image. Our forwardCropRatio partially addresses this, but
+  RANSAC floor estimation would be more robust.
+- **Region growing for our grid**: after threshold-based detection in our
+  16×16 grid, we can apply a simple connected-component analysis to group
+  adjacent "danger" cells into obstacle clusters. This tells us:
+  - How many distinct obstacles are present
+  - The angular width of each obstacle (can I walk around it?)
+  - The closest point of each obstacle
+- **Vocal supplement**: their TTS approach could complement our haptic feedback
+  for critical hazards ("stairs ahead", "wall on left")
+- **Simplified version for our 16×16 grid**:
+  1. Estimate ground from bottom rows of grid (largest depth values)
+  2. Mark cells significantly closer than expected ground depth as obstacles
+  3. Run 4-connected component labeling on the 16×16 binary grid
+  4. For each component: compute centroid (direction) and min depth (urgency)
+
+
+================================================================================
+SYNTHESIS: METHODS TO IMPLEMENT IN OUR SYSTEM
+================================================================================
+
+Priority 1 — Immediate (Step 2: HazardResult)
+----------------------------------------------
+a) VERTICAL GRADIENT ΔV (Papers 7, 8)
+   - grid[r][c] - grid[r+1][c] → detect stairs, curbs, drop-offs
+   - Large positive ΔV = terrain drops away (dangerous)
+   - Large negative ΔV = terrain rises (step up / wall base)
+
+b) HORIZONTAL GRADIENT ΔH (Papers 7, 8)
+   - grid[r][c] - grid[r][c+1] → detect obstacle edges, pillars
+   - Helps determine if obstacle can be walked around
+
+c) COLUMN-SUM OBSTACLE DENSITY (Paper 7 — U-disparity concept)
+   - Sum "danger" cells per column → obstacle density per direction
+   - Left half sum vs. right half sum → which direction is safer
+   - Maps directly to left/right motor intensity
+
+d) TEMPORAL SMOOTHING (Paper 7)
+   - Exponential moving average across frames: grid_smooth = α * grid_new + (1-α) * grid_old
+   - Reduces flickering in haptic output
+
+Priority 2 — Next iteration (Step 2-3)
+---------------------------------------
+e) SIMPLE GROUND PLANE ESTIMATION (Papers 7, 8)
+   - Use bottom rows of depth grid as ground reference
+   - Or lightweight RANSAC on 16×16 grid (only 256 points, very fast)
+   - Cells significantly closer than ground plane = obstacles
+
+f) CONNECTED COMPONENT ANALYSIS (Paper 8)
+   - Binary grid (obstacle/free) → 4-connected components
+   - Each component = one obstacle with centroid direction + min depth
+   - Enables "obstacle on left at 1.2m" type haptic encoding
+
+g) FREE SPACE / SAFEST DIRECTION (Papers 3, 7)
+   - Find the column range with most "green" cells → safest walking direction
+   - Encode as subtle haptic nudge toward safe direction
+
+Priority 3 — Future enhancements
+---------------------------------
+h) POLAR GRID CONVERSION (Paper 7)
+   - Convert Cartesian 16×16 to polar representation for more natural
+     direction-to-motor mapping
+
+i) INDOOR LOCALIZATION (Papers 2, 5)
+   - Leverage ARKit world tracking for indoor navigation
+   - Backtracking feature for return trips
+
+j) MULTIMODAL FEEDBACK (Papers 1, 3, 8)
+   - Add optional audio cues for critical hazards
+   - Consider Apple Watch haptics as supplementary output
+
+k) USER ENGAGEMENT TRACKING (Paper 1)
+   - Track usage patterns to improve system over time
+   - Calibration period for new users
+
+
+================================================================================
+REFERENCES (in order of appearance)
+================================================================================
+[1] Liu, T. et al. (2022). Characterizing and Predicting Engagement of Blind
+    and Low-Vision People with an Audio-Based Navigation App. CHI '22 Extended
+    Abstracts. https://doi.org/10.1145/3491101.3519862
+
+[2] Tsai, C.H. et al. (2024). All the Way There and Back: Inertial-Based,
+    Phone-in-Pocket Indoor Wayfinding and Backtracking Apps for Blind
+    Travelers. ACM TACCESS. https://doi.org/10.1145/3696005
+
+[3] See, A.R., Sasing, B.G., Advincula, W.D. (2022). A Smartphone-Based
+    Mobility Assistant Using Depth Imaging for Visually Impaired and Blind.
+    Applied Sciences, 12(6), 2802. https://doi.org/10.3390/app12062802
+
+[4] MAIDR Meets AI (2024). Exploring Multimodal LLM-Based Data Visualization
+    Interpretation by and with Blind and Low-Vision Users. ASSETS '24.
+    https://doi.org/10.1145/3663548.3675660
+
+[5] Crabb, R., Cheraghi, S.A., Coughlan, J.M. (2023). A Lightweight Approach
+    to Localization for Blind and Visually Impaired Travelers. Sensors, 23(5),
+    2701. https://doi.org/10.3390/s23052701
+
+[6] ASSETS 2019 paper (DOI: 10.1145/3308561.3353788) — could not retrieve.
+    Supplementary: Zuschlag et al. (2022). Obstacle Avoidance for Blind People
+    Using a 3D Camera and a Haptic Feedback Sleeve. arXiv:2201.04453.
+
+[7] Rodriguez, A., Mallofré, A.C., Andrade, L. (2012). Assisting the Visually
+    Impaired: Obstacle Detection and Warning System by Acoustic Feedback.
+    Sensors, 12(12), 17476-17496. https://doi.org/10.3390/s121217476
+
+[8] Huang, H.-C., Hsieh, C.-T., Yeh, C.-H. (2015). An Indoor Obstacle
+    Detection System Using Depth Information and Region Growing. Sensors,
+    15(10), 27116-27141. https://doi.org/10.3390/s151027116

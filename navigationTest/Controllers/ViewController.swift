@@ -257,11 +257,10 @@ class ViewController: UIViewController {
         }
     }
 
-    private func updateDepthGridUI(_ grid: [[Float]]) {
-        let dangerClose = LiDARManager.shared.dangerCloseDistance  // 0.5m — red
-        let danger      = LiDARManager.shared.dangerDistance       // 1.0m — orange
-        let caution     = LiDARManager.shared.cautionDistance      // 2.0m — yellow
+    /// Max distance for gradient color mapping. ≥3.0m = full green.
+    private let maxColorDistance: Float = 3.0
 
+    private func updateDepthGridUI(_ grid: [[Float]]) {
         for r in 0..<grid.count {
             for c in 0..<grid[r].count {
                 guard r < depthGridLabels.count, c < depthGridLabels[r].count else { continue }
@@ -270,22 +269,13 @@ class ViewController: UIViewController {
 
                 if val > 99 {
                     label.text = "inf"
-                    label.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.6)
+                    label.backgroundColor = UIColor(hue: 120.0/360.0, saturation: 0.8, brightness: 0.9, alpha: 0.75)
                 } else {
                     label.text = String(format: "%.1f", val)
-                    if val < dangerClose {
-                        // Red: < 0.5m
-                        label.backgroundColor = UIColor.systemRed.withAlphaComponent(0.8)
-                    } else if val < danger {
-                        // Orange: 0.5m – 1.0m
-                        label.backgroundColor = UIColor.systemOrange.withAlphaComponent(0.7)
-                    } else if val < caution {
-                        // Yellow: 1.0m – 2.0m
-                        label.backgroundColor = UIColor.systemYellow.withAlphaComponent(0.6)
-                    } else {
-                        // Green: > 2.0m
-                        label.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.5)
-                    }
+                    // Continuous gradient: hue 0°(red) at 0m → 120°(green) at maxColorDistance
+                    let ratio = CGFloat(min(max(val, 0), maxColorDistance) / maxColorDistance)
+                    let hue = ratio * (120.0 / 360.0)  // 0.0 → 0.333
+                    label.backgroundColor = UIColor(hue: hue, saturation: 0.8, brightness: 0.9, alpha: 0.75)
                 }
             }
         }
