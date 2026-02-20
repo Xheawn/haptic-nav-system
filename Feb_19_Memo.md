@@ -35,10 +35,46 @@ Reviewed 8 academic papers on assistive navigation, obstacle detection, and hapt
 - Added issues #5-6 (API key exposure, git push conflict)
 - Updated file tables and added B2 references section
 
+### 4. B2 Hazard Analysis Pipeline — Full Implementation ⭐
+Implemented the complete LiDAR obstacle detection and safe path finding system.
+
+**Architecture decisions (from design discussion):**
+- Use full 256×192 depth data for analysis (16×16 grid is debug UI only)
+- ARKit VIO already fuses IMU — no need for separate IMU module
+- Project depth pixels to **world coordinates** via `camera.transform` + scaled `camera.intrinsics` → phone shake/tilt invariant
+- Replace RANSAC with **world Y height comparison** (simpler, handles multi-plane naturally)
+- 3-motor haptic encoding (L/F/R) instead of 2 motors
+
+**LiDARManager.swift — ~650 lines added:**
+- **Data structures**: `FrameAnalysisResult` (spe/sps/spa/nspf/dse/use/pds/pus + obstacles), `ObstacleCluster`, `PointClassification` (6-level), 20+ configurable params
+- **Step A**: Depth → world coordinates (64×48 downsampled, intrinsics scaled from captured image to depth map resolution)
+- **Step B**: Ground Y estimation (histogram peak in lowest 30% + EMA α=0.1)
+- **Step C**: Height classification (ground ±8cm / tripHazard / obstacleLow/Mid/High / dropMild/Severe)
+- **Step E**: Stairs detection (worldY step pattern in central ±10 columns, ≥3 consecutive steps)
+- **Step F**: Slope detection (linear regression on ground points, threshold ±5°)
+- **Step G**: 48-column angular free space map (freeDistance per direction)
+- **Step H**: Safe path finding (contiguous safe corridors, physical width ≥ safeWidthConstant 0.8m, center preference)
+- **Step I**: Temporal smoothing (bool hysteresis 3-on/5-off, EMA angle/distance, asymmetric EMA for nearest obstacle)
+- **Console log**: `[B2] flags=[SPE SPS] angle=+0.0° width=2.50m near=1.20m@+15° groundY=-1.150 obs=2`
+
+**ViewController.swift — ~100 lines added:**
+- **hazardLabel**: On-screen debug label (mode + L/F/R intensities + distances)
+- **handleHazardUpdate()**: P0-P5 priority haptic encoding:
+  - P0: STOP (all 3 motors 255, no safe path)
+  - P1: Drop ahead (F motor fast pulse) — future ESP32 pattern
+  - P2: Steering (angle → L/F/R weight interpolation, urgency from distance)
+  - P3: Terrain overlay (stairs = F≥120, slope = F≥60)
+  - P4: Side awareness (L/R ≤80 when obstacles on sides, F=0)
+  - P5: Clear (all motors 0)
+- **Console log**: `[HAPTIC] P2:steer +15° | L=000 F=113 R=089`
+
+**Build: ✅ SUCCEEDED**
+
 ## Files Modified / Created
 | File | Action |
 |------|--------|
-| `Controllers/ViewController.swift` | Edited (HSB gradient color) |
+| `Controllers/LiDARManager.swift` | **Major edit** (~650 lines: B2 analysis pipeline) |
+| `Controllers/ViewController.swift` | Edited (HSB gradient + B2 hazard label + haptic encoding) |
 | `Literature_Review.txt` | **Created** (English, 8 papers) |
 | `Literature_Review_CN.txt` | **Created** (Chinese, 8 papers) |
 | `Feb_18_Memo.md` | Updated (added §2-4, issues, references) |
@@ -47,7 +83,7 @@ Reviewed 8 academic papers on assistive navigation, obstacle detection, and hapt
 | `Feb_19_Memo_CN.md` | **Created** |
 
 ## Next Steps
-- **Step 2:** Implement ΔV + ΔH gradient analysis + column-sum density + EMA temporal smoothing → `HazardResult` output
-- **Step 3:** Arbitration Layer merging Google Maps direction + LiDAR hazard
-- **Step 4:** ESP32 protocol extension for STOP/terrain commands + motor patterns
-- Test HSB gradient on real device
+- **Step 3:** Arbitration Layer — merge macro (Google Maps direction) + micro (LiDAR hazard)
+- **Step 4:** ESP32 protocol upgrade (4-byte packet: CommandType + L/F/R intensities) + 3-motor PWM
+- **Hardware:** Decide Front motor GPIO pin, test on real device
+- Real-device testing of B2 analysis output (verify groundY, safe path, obstacle detection)

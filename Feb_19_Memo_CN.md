@@ -35,19 +35,55 @@
 - 新增问题 #5-6（API key 暴露、git push 冲突）
 - 更新文件表格，新增 B2 参考文献部分
 
+### 4. B2 障碍物分析流水线 — 完整实现 ⭐
+实现了完整的 LiDAR 障碍物检测与安全路径寻找系统。
+
+**架构决策（来自设计讨论）：**
+- 使用完整 256×192 深度数据进行分析（16×16 网格仅用于 debug UI）
+- ARKit VIO 已融合 IMU —— 不需要单独调用 IMU 模块
+- 将深度像素投影到**世界坐标**（通过 `camera.transform` + 缩放后的 `camera.intrinsics`）→ 手机晃动/倾斜无影响
+- 用**世界 Y 高度比较**替代 RANSAC（更简单，天然处理多平面）
+- 3 电机触觉编码（L/F/R）替代原来的 2 电机
+
+**LiDARManager.swift — 新增约 650 行：**
+- **数据结构**: `FrameAnalysisResult`（spe/sps/spa/nspf/dse/use/pds/pus + 障碍物簇）、`ObstacleCluster`、`PointClassification`（6 级）、20+ 可配置参数
+- **Step A**: 深度 → 世界坐标（64×48 降采样，intrinsics 从相机图像分辨率缩放到深度图分辨率）
+- **Step B**: 地面高度估计（最低 30% Y 值直方图峰值 + EMA α=0.1）
+- **Step C**: 高度分类（地面 ±8cm / 绊倒风险 / 低/中/高障碍物 / 轻度/严重落差）
+- **Step E**: 台阶检测（中央 ±10 列 worldY 阶梯模式，≥3 级连续台阶）
+- **Step F**: 坡道检测（地面点线性回归，阈值 ±5°）
+- **Step G**: 48 列角度自由空间图（每方向的 freeDistance）
+- **Step H**: 安全路径寻找（连续安全列段，物理宽度 ≥ safeWidthConstant 0.8m，优先正前方）
+- **Step I**: 时间平滑（布尔滞后 3帧开/5帧关，EMA 角度/距离，非对称 EMA 最近障碍物距离）
+- **Console log**: `[B2] flags=[SPE SPS] angle=+0.0° width=2.50m near=1.20m@+15° groundY=-1.150 obs=2`
+
+**ViewController.swift — 新增约 100 行：**
+- **hazardLabel**: 屏幕 debug 标签（模式 + L/F/R 强度 + 距离信息）
+- **handleHazardUpdate()**: P0-P5 优先级触觉编码：
+  - P0: 停止（3 电机全 255，无安全路径）
+  - P1: 前方落差（F 电机快脉冲）—— 未来 ESP32 模式
+  - P2: 转向引导（角度 → L/F/R 权重插值，距离决定紧迫度）
+  - P3: 地形叠加（台阶 = F≥120，坡道 = F≥60）
+  - P4: 两侧感知（L/R ≤80，侧面有障碍，F=0）
+  - P5: 畅通（全部 0）
+- **Console log**: `[HAPTIC] P2:steer +15° | L=000 F=113 R=089`
+
+**编译: ✅ 成功**
+
 ## 修改/创建的文件
 | 文件 | 操作 |
 |------|------|
-| `Controllers/ViewController.swift` | 编辑（HSB 渐变颜色） |
+| `Controllers/LiDARManager.swift` | **大幅编辑**（约 650 行：B2 分析流水线） |
+| `Controllers/ViewController.swift` | 编辑（HSB 渐变 + B2 hazard 标签 + 触觉编码） |
 | `Literature_Review.txt` | **新建**（英文，8 篇论文） |
 | `Literature_Review_CN.txt` | **新建**（中文，8 篇论文） |
 | `Feb_18_Memo.md` | 更新（新增 §2-4、问题、参考文献） |
 | `Feb_18_Memo_CN.md` | 更新（新增 §2-4、问题、参考文献） |
-| `Feb_19_Memo.md` | **新建** |
-| `Feb_19_Memo_CN.md` | **新建** |
+| `Feb_19_Memo.md` | **新建** + 更新 |
+| `Feb_19_Memo_CN.md` | **新建** + 更新 |
 
 ## 下一步
-- **Step 2:** 实现 ΔV + ΔH 梯度分析 + 列求和密度 + EMA 时间平滑 → 输出 `HazardResult`
-- **Step 3:** 仲裁层，融合 Google Maps 导航方向 + LiDAR 危险信息
-- **Step 4:** ESP32 协议扩展，支持 STOP/地形指令 + 马达振动模式
-- 在真机上测试 HSB 渐变效果
+- **Step 3:** 仲裁层 — 融合 macro（Google Maps 方向）+ micro（LiDAR 危险信息）
+- **Step 4:** ESP32 协议升级（4 字节包：CommandType + L/F/R 强度）+ 3 电机 PWM
+- **硬件:** 确定 Front 电机 GPIO 引脚，真机测试
+- 真机测试 B2 分析输出（验证 groundY、安全路径、障碍物检测）

@@ -95,24 +95,31 @@ ESP32-S3 (Peripheral)
   - 16×16 grid，每 cell percentile-10 (Quickselect O(n))
   - Portrait 方向修正 (buffer x→display row, buffer y→display col, L↔R 镜像)
   - `forwardCropRatio=0.75` 前方聚焦 (裁掉 25% 近地面区域)
-  - 4 档颜色 debug UI overlay (红<0.5m / 橙0.5-1.0m / 黄1.0-2.0m / 绿>2.0m)
+  - HSB 色相连续渐变 debug UI (0°红@0m → 120°绿@3m, `maxColorDistance=3.0`)
   - 5 Hz 分析 + 2 Hz console log，Quickselect 优化减少发热
 
-- [ ] **B2: 梯度分析 + 障碍物检测**
-  - 水平梯度 ΔH: 检测墙壁/柱子等立面障碍物边缘
-  - 垂直梯度 ΔV: 检测台阶/路沿/地面落差
-  - 绝对距离阈值: center cols < dangerDistance → DANGER
-  - Free space: 左半 vs 右半平均深度 → 转向建议
-  - 输出 `HazardResult { level, steerSuggestion, nearestDepth, terrainAlert }`
+- [x] **B2: 世界坐标障碍物检测 + 安全路径寻找 + 3电机触觉编码**
+  - 64×48 降采样深度 → 世界坐标投影 (`camera.transform` + scaled `camera.intrinsics`)
+  - 地面高度估计: 最低 30% Y 值直方图峰值 + EMA α=0.1
+  - 6 级高度分类: ground / tripHazard / obstacleLow/Mid/High / dropMild/Severe
+  - 台阶检测: 中央±10列 worldY 阶梯模式 (≥3级)
+  - 坡道检测: 地面点线性回归 (±5° 阈值)
+  - 48列角度自由空间图 → 安全路径寻找 (corridor width ≥ 0.8m)
+  - 时间平滑: Bool 滞后 (3帧开/5帧关) + EMA 角度/距离 + 非对称 EMA
+  - 输出 `FrameAnalysisResult { spe, sps, spa, spw, pds, pus, dse, use, nspf, obstacles[] }`
+  - P0-P5 优先级触觉编码: 障碍物方向角 → L/F/R 电机强度 (0-255)
+  - 软件模拟: `[HAPTIC] P2:steer +15° | L=000 F=113 R=089` console log
+  - hazardLabel debug UI 实时显示
 
 - [ ] **B3: Safety Arbitration Layer**
   - 融合 macro (Google Maps 方向) 和 micro (LiDAR 风险) 信息
-  - 输出最终 haptic command: `clear / steer_left / steer_right / stop`
-  - Safety-first 原则：micro 安全优先于 macro 导航
+  - micro 安全优先于 macro 导航 (safety-first)
+  - 输出最终 haptic command 并通过 BLE 发送
 
-- [ ] **B4: 紧迫感编码**
-  - 脉冲频率 (pulse frequency) 映射危险等级
-  - 更新 ESP32 解析逻辑以支持多种模式
+- [ ] **B4: ESP32 3电机 PWM 驱动 + BLE 协议升级**
+  - BLE 升级为 4 字节包: [CommandType, L, F, R]
+  - 新增第 3 个电机 (Front) GPIO 引脚
+  - PWM 驱动 3 路电机，支持 STOP/台阶/坡道等脉冲模式
 
 ### Phase C — 用户评估
 
@@ -155,11 +162,17 @@ ESP32-S3 (Peripheral)
 Service UUID:        4fafc201-1fb5-459e-8fcc-c5c9c331914b
 Characteristic UUID: beb5483e-36e1-4688-b7f5-ea07361b26a8
 
-Packet: 2 bytes
+Packet (legacy macro navigation): 2 bytes
   Byte 0: AdjustDirection  (0=none, 1=left, 2=right, 3=off-route)
   Byte 1: AngleDiff magnitude (0–180, clamped & rounded to uint8)
+
+Packet (B2 micro safety, planned): 4 bytes
+  Byte 0: CommandType  (0=nav_direction, 1=obstacle_haptic, 2=stop, 3=terrain_alert)
+  Byte 1: Motor_L intensity (0-255)
+  Byte 2: Motor_F intensity (0-255)
+  Byte 3: Motor_R intensity (0-255)
 ```
 
 ---
 
-*Last updated by Shawn: 2026-02-18*
+*Last updated by Shawn: 2026-02-19*

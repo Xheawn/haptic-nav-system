@@ -49,9 +49,28 @@ class ViewController: UIViewController {
     // Track off-route state (outside thresholds 1 and 2)
     var isOffRoute: Bool = false
     
-    // LiDAR debug grid (8×8) — temporary for verification
+    // LiDAR debug grid (16×16) — temporary for verification
     var depthGridContainer: UIView!
     var depthGridLabels: [[UILabel]] = []
+
+    // B2: Hazard analysis debug label
+    let hazardLabel: UILabel = {
+        let label = UILabel()
+        label.text = "B2: --"
+        label.font = UIFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+        label.textAlignment = .left
+        label.numberOfLines = 3
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        label.textColor = .white
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    // B2: Smoothed motor intensities (0-255) for L/F/R
+    private var motorL: Float = 0
+    private var motorF: Float = 0
+    private var motorR: Float = 0
+    private let motorAlpha: Float = 0.4  // EMA smoothing for motor output
     
     // Stage 6 单位为米
     let threshold_1_radius = 20.0 // original = 4.0
@@ -134,6 +153,10 @@ class ViewController: UIViewController {
         LiDARManager.shared.onGridUpdate = { [weak self] grid in
             self?.updateDepthGridUI(grid)
         }
+        LiDARManager.shared.onHazardUpdate = { [weak self] analysis in
+            self?.handleHazardUpdate(analysis)
+        }
+        setupHazardLabel()
     }
 
     // 初始化并配置地图视图
@@ -279,6 +302,102 @@ class ViewController: UIViewController {
                 }
             }
         }
+    }
+
+    // MARK: - B2 Hazard Label Setup
+
+    private func setupHazardLabel() {
+        view.addSubview(hazardLabel)
+        NSLayoutConstraint.activate([
+            hazardLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
+            hazardLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
+            hazardLabel.bottomAnchor.constraint(equalTo: angleDiffLabel.topAnchor, constant: -4),
+        ])
+    }
+
+    // MARK: - B2 Haptic Encoding (FrameAnalysisResult → L/F/R motor intensities)
+
+    private func handleHazardUpdate(_ a: FrameAnalysisResult) {
+        // Compute raw motor intensities based on priority
+        var rawL: Float = 0, rawF: Float = 0, rawR: Float = 0
+        var mode = "P5:clear"
+
+        if a.noSafePathFound {
+            // P0: Emergency stop — all motors rapid pulse (handled by ESP32 pattern)
+            rawL = 255; rawF = 255; rawR = 255
+            mode = "P0:STOP"
+        } else if a.safePathExist && !a.safePathStraight {
+            // P2: Steering guidance — angle → L/F/R weight interpolation
+            let theta = a.safePathAngle  // °, +=right, -=left
+            let urgency = 1.0 - min(max(a.nearestObstacleDistance / LiDARManager.shared.maxAnalysisRange, 0), 1)
+            let base = 80.0 + urgency * 175.0  // 80~255
+
+            if theta >= 0 {
+                // Safe path is to the right → guide right
+                let rWeight = min(1.0, theta / 45.0)
+                let fWeight = max(0.0, 1.0 - theta / 45.0)
+                rawR = base * rWeight
+                rawF = base * fWeight
+                rawL = 0
+            } else {
+                // Safe path is to the left → guide left
+                let absTheta = abs(theta)
+                let lWeight = min(1.0, absTheta / 45.0)
+                let fWeight = max(0.0, 1.0 - absTheta / 45.0)
+                rawL = base * lWeight
+                rawF = base * fWeight
+                rawR = 0
+            }
+            mode = String(format: "P2:steer %+.0f°", theta)
+        } else if a.safePathExist && a.safePathStraight {
+            // P4: Side awareness (obstacles on sides but path ahead is clear)
+            // Check nearest obstacle on each half
+            let analysis = LiDARManager.shared.latestAnalysis
+            for obs in analysis.obstacles {
+                let dist = max(0.3, obs.distance)
+                let sideIntensity = max(0, 80.0 * (1.0 - dist / 2.0))  // max 80 at <0.3m
+                if obs.centerAngle < 0 {
+                    rawL = max(rawL, sideIntensity)
+                } else {
+                    rawR = max(rawR, sideIntensity)
+                }
+            }
+            if rawL > 5 || rawR > 5 {
+                mode = String(format: "P4:sides L%.0f R%.0f", rawL, rawR)
+            }
+            // F stays 0 for clear path
+        }
+
+        // P3: Terrain alert overlay (additive on F motor)
+        if a.upStairsExist || a.downStairsExist {
+            rawF = max(rawF, 120)
+            mode += a.upStairsExist ? " +stairs↑" : " +stairs↓"
+        }
+        if a.pathUpSlope || a.pathDownSlope {
+            rawF = max(rawF, 60)
+            mode += a.pathUpSlope ? " +slope↑" : " +slope↓"
+        }
+
+        // Clamp to 0-255
+        rawL = min(255, max(0, rawL))
+        rawF = min(255, max(0, rawF))
+        rawR = min(255, max(0, rawR))
+
+        // EMA smooth motor output
+        motorL = motorL * (1 - motorAlpha) + rawL * motorAlpha
+        motorF = motorF * (1 - motorAlpha) + rawF * motorAlpha
+        motorR = motorR * (1 - motorAlpha) + rawR * motorAlpha
+
+        // Update debug label
+        let labelText = String(format: "B2: %@ | L=%03.0f F=%03.0f R=%03.0f\nnear=%.1fm@%+.0f° w=%.1fm gY=%.2f obs=%d",
+                                mode, motorL, motorF, motorR,
+                                a.nearestObstacleDistance, a.nearestObstacleAngle,
+                                a.safePathWidth, a.groundY, a.obstacles.count)
+        hazardLabel.text = labelText
+
+        // Console log (uses same throttle as LiDARManager's 2Hz log)
+        print(String(format: "[HAPTIC] %@ | L=%03.0f F=%03.0f R=%03.0f",
+                     mode, motorL, motorF, motorR))
     }
 
     // Stage 4
