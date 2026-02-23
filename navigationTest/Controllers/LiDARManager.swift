@@ -133,11 +133,6 @@ class LiDARManager: NSObject {
     /// Frames of consecutive non-detection to deactivate a bool flag
     var boolHysteresisOff: Int = 5
 
-    // MARK: - B2 Analysis constants
-
-    static let analysisRows = 64
-    static let analysisCols = 48
-
     // MARK: - Grid constants
 
     static let gridRows = 16
@@ -176,6 +171,7 @@ class LiDARManager: NSObject {
     private var smoothedGroundY: Float?
     private var smoothedAngle: Float = 0
     private var smoothedNearestDist: Float = 5.0
+    private var lastCameraPitch: Float?  // degrees, 0=horizontal, +90=looking up, -90=looking down
 
     // Hysteresis counters for bool flags: [flagName: consecutiveFrameCount]
     // Positive = consecutive true frames, negative = consecutive false frames
@@ -229,12 +225,13 @@ extension LiDARManager: ARSessionDelegate {
         // Prefer smoothedSceneDepth; fall back to sceneDepth
         guard let depthData = frame.smoothedSceneDepth ?? frame.sceneDepth else { return }
         let depthMap = depthData.depthMap  // CVPixelBuffer, Float32, 256×192
+        let confidenceMap = depthData.confidenceMap  // CVPixelBuffer?, UInt8, 256×192
 
         let grid = buildGrid(from: depthMap)
         self.depthGrid = grid
 
         // B2: Full-resolution hazard analysis
-        let analysis = analyzeHazards(frame: frame, depthMap: depthMap)
+        let analysis = analyzeHazards(frame: frame, depthMap: depthMap, confidenceMap: confidenceMap)
         self.latestAnalysis = analysis
 
         // Notify UI on main thread
@@ -371,7 +368,7 @@ extension LiDARManager {
 extension LiDARManager {
 
     /// Main entry: analyse full-resolution depth + camera pose → FrameAnalysisResult
-    func analyzeHazards(frame: ARFrame, depthMap: CVPixelBuffer) -> FrameAnalysisResult {
+    func analyzeHazards(frame: ARFrame, depthMap: CVPixelBuffer, confidenceMap: CVPixelBuffer?) -> FrameAnalysisResult {
         let camera = frame.camera
         let transform = camera.transform
         // camera.intrinsics is for capturedImage resolution; scale to depth map resolution
@@ -387,13 +384,20 @@ extension LiDARManager {
         scaledIntrinsics[2][0] *= scaleX   // cx
         scaledIntrinsics[2][1] *= scaleY   // cy
 
-        let rows = LiDARManager.analysisRows // 64
-        let cols = LiDARManager.analysisCols // 48
+        // Compute camera pitch for debug logging
+        // Camera forward = -Z column of transform (column 2, negated)
+        let fwd = -simd_float3(transform.columns.2.x, transform.columns.2.y, transform.columns.2.z)
+        lastCameraPitch = asin(fwd.y) * 180.0 / Float.pi  // +up, -down
 
-        // ── Step A: Depth → World coordinates (64×48 downsampled) ──
+        // Full resolution: use every depth pixel (with forward crop)
+        let rows = Int(depthW * forwardCropRatio) // e.g. 256*0.75 = 192
+        let cols = Int(depthH)                     // 192
+
+        // ── Step A: Depth → World coordinates (full resolution + confidence filter) ──
         let (worldPoints, validMask) = projectToWorld(
             depthMap: depthMap, transform: transform,
-            intrinsics: scaledIntrinsics, rows: rows, cols: cols
+            intrinsics: scaledIntrinsics, rows: rows, cols: cols,
+            confidenceMap: confidenceMap
         )
 
         // ── Step B: Ground Y estimation ──
@@ -404,22 +408,25 @@ extension LiDARManager {
         let classification = classifyPoints(worldPoints: worldPoints, validMask: validMask,
                                              rows: rows, cols: cols, groundY: currentGroundY)
 
+        // Camera position for relative distance calculations
+        let camPos = simd_float3(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
+
         // ── Step E: Stairs detection ──
         let (rawUpStairs, rawDownStairs) = detectStairs(
             worldPoints: worldPoints, classification: classification,
-            validMask: validMask, rows: rows, cols: cols
+            validMask: validMask, rows: rows, cols: cols, cameraPos: camPos
         )
 
         // ── Step F: Slope detection ──
         let (rawUpSlope, rawDownSlope) = detectSlope(
             worldPoints: worldPoints, classification: classification,
-            validMask: validMask, rows: rows, cols: cols
+            validMask: validMask, rows: rows, cols: cols, cameraPos: camPos
         )
 
         // ── Step G: Angular free space map ──
         let freeDistance = computeFreeSpaceMap(
             worldPoints: worldPoints, classification: classification,
-            validMask: validMask, rows: rows, cols: cols
+            validMask: validMask, rows: rows, cols: cols, cameraPos: camPos
         )
 
         // ── Step H: Safe path finding ──
@@ -467,10 +474,13 @@ extension LiDARManager {
 
     private func projectToWorld(
         depthMap: CVPixelBuffer, transform: simd_float4x4,
-        intrinsics: simd_float3x3, rows: Int, cols: Int
+        intrinsics: simd_float3x3, rows: Int, cols: Int,
+        confidenceMap: CVPixelBuffer?
     ) -> ([[simd_float3]], [[Bool]]) {
         CVPixelBufferLockBaseAddress(depthMap, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
+        if let conf = confidenceMap { CVPixelBufferLockBaseAddress(conf, .readOnly) }
+        defer { if let conf = confidenceMap { CVPixelBufferUnlockBaseAddress(conf, .readOnly) } }
 
         let bufW = CVPixelBufferGetWidth(depthMap)    // 256
         let bufH = CVPixelBufferGetHeight(depthMap)    // 192
@@ -484,6 +494,17 @@ extension LiDARManager {
         let floatBuffer = baseAddress.assumingMemoryBound(to: Float32.self)
         let bytesPerRow = CVPixelBufferGetBytesPerRow(depthMap)
         let floatsPerRow = bytesPerRow / MemoryLayout<Float32>.size
+
+        // Confidence map buffer (nil if unavailable)
+        let confBuffer: UnsafeMutablePointer<UInt8>?
+        let confBytesPerRow: Int
+        if let conf = confidenceMap, let confBase = CVPixelBufferGetBaseAddress(conf) {
+            confBuffer = confBase.assumingMemoryBound(to: UInt8.self)
+            confBytesPerRow = CVPixelBufferGetBytesPerRow(conf)
+        } else {
+            confBuffer = nil
+            confBytesPerRow = 0
+        }
 
         // Intrinsics for depth map resolution
         let fx = intrinsics[0][0]
@@ -509,12 +530,18 @@ extension LiDARManager {
                 let d = floatBuffer[by * floatsPerRow + bx]
                 guard d > 0 && !d.isNaN && !d.isInfinite && d < maxAnalysisRange else { continue }
 
+                // Skip low-confidence pixels (ARConfidenceLevel: 0=low, 1=medium, 2=high)
+                if let cb = confBuffer {
+                    let confidence = cb[by * confBytesPerRow + bx]
+                    guard confidence >= 1 else { continue }
+                }
+
                 // Unproject to camera coordinates
-                // In ARKit depth buffer coordinate system:
-                // bx maps along buffer width, by maps along buffer height
-                let x_cam = (Float(bx) - cx) * d / fx
-                let y_cam = (Float(by) - cy) * d / fy
-                let z_cam = d
+                // ARKit camera: +X right, +Y up, -Z forward
+                // Image Y flipped vs camera Y → negative; depth along -Z → negative
+                let x_cam = d * (Float(bx) - cx) / fx
+                let y_cam = -d * (Float(by) - cy) / fy
+                let z_cam = -d
 
                 // Transform to world coordinates
                 let camPoint = simd_float4(x_cam, y_cam, z_cam, 1.0)
@@ -635,15 +662,16 @@ extension LiDARManager {
 
     private func detectStairs(
         worldPoints: [[simd_float3]], classification: [[PointClassification]],
-        validMask: [[Bool]], rows: Int, cols: Int
+        validMask: [[Bool]], rows: Int, cols: Int, cameraPos: simd_float3
     ) -> (upStairs: Bool, downStairs: Bool) {
         var upStairs = false
         var downStairs = false
 
-        // Scan central ±10 columns (about forward ±10°)
+        // Scan central ±10° (column range scales with resolution)
         let centerCol = cols / 2
-        let scanStart = max(0, centerCol - 10)
-        let scanEnd = min(cols, centerCol + 10)
+        let stairScanCols = max(10, cols * 10 / 48) // ±10 cols @48 → ±40 cols @192
+        let scanStart = max(0, centerCol - stairScanCols)
+        let scanEnd = min(cols, centerCol + stairScanCols)
 
         for col in scanStart..<scanEnd {
             // Collect (worldY, worldZ forward distance) for ground-ish points
@@ -653,8 +681,10 @@ extension LiDARManager {
                 let cls = classification[row][col]
                 if cls == .ground || cls == .tripHazard || cls == .obstacleLow {
                     let pt = worldPoints[row][col]
-                    // horizontal distance from camera
-                    let hdist = sqrtf(pt.x * pt.x + pt.z * pt.z)
+                    // horizontal distance from camera (not world origin)
+                    let dx = pt.x - cameraPos.x
+                    let dz = pt.z - cameraPos.z
+                    let hdist = sqrtf(dx * dx + dz * dz)
                     yzPairs.append((y: pt.y, z: hdist))
                 }
             }
@@ -699,12 +729,13 @@ extension LiDARManager {
 
     private func detectSlope(
         worldPoints: [[simd_float3]], classification: [[PointClassification]],
-        validMask: [[Bool]], rows: Int, cols: Int
+        validMask: [[Bool]], rows: Int, cols: Int, cameraPos: simd_float3
     ) -> (upSlope: Bool, downSlope: Bool) {
-        // Collect GROUND points from central 10 columns
+        // Collect GROUND-only points from central ±5° (column range scales with resolution)
         let centerCol = cols / 2
-        let scanStart = max(0, centerCol - 5)
-        let scanEnd = min(cols, centerCol + 5)
+        let slopeScanCols = max(5, cols * 5 / 48) // ±5 cols @48 → ±20 cols @192
+        let scanStart = max(0, centerCol - slopeScanCols)
+        let scanEnd = min(cols, centerCol + slopeScanCols)
 
         var forwardDists: [Float] = []
         var heights: [Float] = []
@@ -713,13 +744,21 @@ extension LiDARManager {
             for row in 0..<rows {
                 guard validMask[row][col], classification[row][col] == .ground else { continue }
                 let pt = worldPoints[row][col]
-                let hdist = sqrtf(pt.x * pt.x + pt.z * pt.z)
+                let dx = pt.x - cameraPos.x
+                let dz = pt.z - cameraPos.z
+                let hdist = sqrtf(dx * dx + dz * dz)
                 forwardDists.append(hdist)
                 heights.append(pt.y)
             }
         }
 
-        guard forwardDists.count >= 20 else { return (false, false) }
+        // Need enough points for meaningful regression
+        guard forwardDists.count >= 30 else { return (false, false) }
+
+        // Ground points must span at least 1.0m of horizontal distance
+        let minDist = forwardDists.min()!
+        let maxDist = forwardDists.max()!
+        guard maxDist - minDist >= 1.0 else { return (false, false) }
 
         // Simple linear regression: Y = a * dist + b
         let n = Float(forwardDists.count)
@@ -732,10 +771,26 @@ extension LiDARManager {
             sumX2 += forwardDists[i] * forwardDists[i]
         }
 
-        let denom = n * sumX2 - sumX * sumX
-        guard abs(denom) > 1e-6 else { return (false, false) }
+        let denomX = n * sumX2 - sumX * sumX
+        guard abs(denomX) > 1e-6 else { return (false, false) }
 
-        let a = (n * sumXY - sumX * sumY) / denom  // slope coefficient
+        let a = (n * sumXY - sumX * sumY) / denomX  // slope coefficient
+        let b = (sumY - a * sumX) / n
+
+        // Compute R² — reject low-quality fits (noise, not a real slope)
+        let meanY = sumY / n
+        var ssTot: Float = 0
+        var ssRes: Float = 0
+        for i in 0..<forwardDists.count {
+            let predicted = a * forwardDists[i] + b
+            ssRes += (heights[i] - predicted) * (heights[i] - predicted)
+            ssTot += (heights[i] - meanY) * (heights[i] - meanY)
+        }
+
+        let rSquared = ssTot > 1e-6 ? 1.0 - ssRes / ssTot : 0
+        // Only report slope if the linear fit actually explains the data well
+        guard rSquared > 0.5 else { return (false, false) }
+
         let slopeAngleDeg = atan(a) * 180.0 / Float.pi
 
         let upSlope = slopeAngleDeg > slopeAngleThreshold
@@ -748,7 +803,7 @@ extension LiDARManager {
 
     private func computeFreeSpaceMap(
         worldPoints: [[simd_float3]], classification: [[PointClassification]],
-        validMask: [[Bool]], rows: Int, cols: Int
+        validMask: [[Bool]], rows: Int, cols: Int, cameraPos: simd_float3
     ) -> [Float] {
         var freeDistance = Array(repeating: maxAnalysisRange, count: cols)
 
@@ -765,7 +820,9 @@ extension LiDARManager {
                 guard isBlocking else { continue }
 
                 let pt = worldPoints[row][col]
-                let hdist = sqrtf(pt.x * pt.x + pt.z * pt.z)
+                let dx = pt.x - cameraPos.x
+                let dz = pt.z - cameraPos.z
+                let hdist = sqrtf(dx * dx + dz * dz)
                 minDist = min(minDist, hdist)
             }
 
@@ -1025,6 +1082,14 @@ extension LiDARManager {
         let nearStr  = String(format: "%.2fm@%+.0f°", a.nearestObstacleDistance, a.nearestObstacleAngle)
         let groundStr = String(format: "%.3f", a.groundY)
 
-        print("[B2] flags=[\(flagStr)] angle=\(angleStr) width=\(widthStr) near=\(nearStr) groundY=\(groundStr) obs=\(a.obstacles.count)")
+        // Log camera pitch for verifying tilt-aware behaviour
+        let pitchStr: String
+        if let pitch = lastCameraPitch {
+            pitchStr = String(format: " pitch=%.0f°", pitch)
+        } else {
+            pitchStr = ""
+        }
+
+        print("[B2] flags=[\(flagStr)] angle=\(angleStr) width=\(widthStr) near=\(nearStr) groundY=\(groundStr) obs=\(a.obstacles.count)\(pitchStr)")
     }
 }

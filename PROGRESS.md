@@ -99,17 +99,20 @@ ESP32-S3 (Peripheral)
   - 5 Hz 分析 + 2 Hz console log，Quickselect 优化减少发热
 
 - [x] **B2: 世界坐标障碍物检测 + 安全路径寻找 + 3电机触觉编码**
-  - 64×48 降采样深度 → 世界坐标投影 (`camera.transform` + scaled `camera.intrinsics`)
+  - **全分辨率** 192×192 分析 (stride=1, 36,864 点) + `ARDepthData.confidenceMap` 过滤低置信度点
+  - 世界坐标投影 (`camera.transform` + scaled `camera.intrinsics`)
+  - 相机坐标符号修正: y_cam 取反 (图像Y↓ vs 相机Y↑), z_cam = -d (相机朝 -Z 看)
+  - 所有距离计算基于相机位置 (cameraPos)，而非世界原点
   - 地面高度估计: 最低 30% Y 值直方图峰值 + EMA α=0.1
   - 6 级高度分类: ground / tripHazard / obstacleLow/Mid/High / dropMild/Severe
-  - 台阶检测: 中央±10列 worldY 阶梯模式 (≥3级)
-  - 坡道检测: 地面点线性回归 (±5° 阈值)
-  - 48列角度自由空间图 → 安全路径寻找 (corridor width ≥ 0.8m)
+  - 台阶检测: 中央±10° worldY 阶梯模式 (≥3级, 列数随分辨率自适应)
+  - 坡道检测: 中央±5° 地面点线性回归 + R²>0.5 + 最小距离跨度≥1m
+  - 192列角度自由空间图 (≈0.24°/列) → 安全路径寻找 (corridor width ≥ 0.8m)
   - 时间平滑: Bool 滞后 (3帧开/5帧关) + EMA 角度/距离 + 非对称 EMA
   - 输出 `FrameAnalysisResult { spe, sps, spa, spw, pds, pus, dse, use, nspf, obstacles[] }`
   - P0-P5 优先级触觉编码: 障碍物方向角 → L/F/R 电机强度 (0-255)
   - 软件模拟: `[HAPTIC] P2:steer +15° | L=000 F=113 R=089` console log
-  - hazardLabel debug UI 实时显示
+  - hazardLabel debug UI 实时显示 + camera pitch 日志
 
 - [ ] **B3: Safety Arbitration Layer**
   - 融合 macro (Google Maps 方向) 和 micro (LiDAR 风险) 信息
@@ -175,4 +178,4 @@ Packet (B2 micro safety, planned): 4 bytes
 
 ---
 
-*Last updated by Shawn: 2026-02-19*
+*Last updated by Shawn: 2026-02-23*
