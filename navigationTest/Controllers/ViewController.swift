@@ -322,10 +322,32 @@ class ViewController: UIViewController {
         var rawL: Float = 0, rawF: Float = 0, rawR: Float = 0
         var mode = "P5:clear"
 
-        if a.noSafePathFound {
-            // P0: Emergency stop — all motors rapid pulse (handled by ESP32 pattern)
+        if a.noSafePathFound && a.nearestForwardDistance < 1.0 {
+            // P0: Emergency stop — forward ±15° fully blocked AND < 1m away
             rawL = 255; rawF = 255; rawR = 255
-            mode = "P0:STOP"
+            mode = String(format: "P0:STOP fwd=%.1fm", a.nearestForwardDistance)
+        } else if a.noSafePathFound {
+            // P1: Blocked but still have distance — steer toward best-effort gap
+            let theta = a.safePathAngle  // best-effort gap angle (may be narrow < 0.8m)
+            let urgency = 1.0 - min(max(a.nearestForwardDistance / LiDARManager.shared.maxAnalysisRange, 0), 1)
+            let base: Float = 120.0 + urgency * 80.0  // 120~200
+
+            if abs(theta) < 3.0 {
+                // No clear gap direction — warn forward
+                rawF = base
+            } else if theta >= 0 {
+                let rWeight = min(1.0, theta / 45.0)
+                let fWeight = max(0.0, 1.0 - theta / 45.0)
+                rawR = base * rWeight
+                rawF = base * fWeight
+            } else {
+                let absTheta = abs(theta)
+                let lWeight = min(1.0, absTheta / 45.0)
+                let fWeight = max(0.0, 1.0 - absTheta / 45.0)
+                rawL = base * lWeight
+                rawF = base * fWeight
+            }
+            mode = String(format: "P1:blocked %+.0f° fwd=%.1fm", theta, a.nearestForwardDistance)
         } else if a.safePathExist && !a.safePathStraight {
             // P2: Steering guidance — angle → L/F/R weight interpolation
             let theta = a.safePathAngle  // °, +=right, -=left

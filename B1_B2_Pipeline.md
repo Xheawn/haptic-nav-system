@@ -414,3 +414,116 @@ handleHazardUpdate(FrameAnalysisResult)
 - **室外倾斜地面**: 直方图仍能找到地面的平均高度; 坡道由 Step F 单独检测
 - **台阶**: 直方图会找到当前脚下平台的高度; 台阶由 Step E 检测
 - **大落差 (悬崖边)**: 地面像素仍占多数, 落差点被归入较低 bin 但数量少, 不影响峰值
+
+---
+
+## 端到端时序管线
+
+### 时间线 (analysisInterval = 0.2s, 5Hz)
+
+```
+时间(s)     iPhone 端                           ESP32 端
+──────────────────────────────────────────────────────────────
+0.000       ARKit 启动
+0.000-0.015 帧#1: 采集+B1+B2处理+BLE发送(~15ms)
+0.015       ─── BLE 传输 ~10ms ───────────────→ 收到帧#1 L/F/R
+0.025                                           电机输出帧#1的PWM值
+  ...       (空闲等待下一个0.2s窗口)              电机保持帧#1的值不变
+0.200-0.215 帧#2: 采集+处理+BLE发送
+0.225                                           电机切换到帧#2的值
+  ...                                           电机保持帧#2的值不变
+0.400-0.415 帧#3: 采集+处理+BLE发送
+0.425                                           电机切换到帧#3的值
+  ...
+0.600-0.615 帧#4
+0.800-0.815 帧#5
+1.000-1.015 帧#6                                ← 第一秒处理了5帧
+```
+
+### 各阶段延迟分解
+
+| 阶段 | 耗时 | 说明 |
+|------|------|------|
+| LiDAR 硬件采集 | ~16ms | ARKit 内部 60FPS，我们节流到 5FPS |
+| 节流等待 | 0~200ms | 最坏情况刚错过上一个窗口 |
+| B1: buildGrid (16×16) | ~1-2ms | percentile-10 quickselect |
+| B2: analyzeHazards (192×192) | ~5-15ms | 取决于 valid 像素数量 |
+| ├─ Step A: projectToWorld | ~3-5ms | 矩阵乘法 × 36864 像素 |
+| ├─ Step B: estimateBandGroundY | ~1-2ms | 3 波段直方图 + EMA |
+| ├─ Step C: classifyPoints | ~1-2ms | 逐点高度分类 |
+| ├─ Step E-F: stairs/slope | ~1ms | 中央列扫描 + 线性回归 |
+| ├─ Step G-H: freespace/path | ~1-2ms | 192 列 → 走廊评分 |
+| └─ Step I: temporal smoothing | ~0.1ms | 滞后计数器 + EMA |
+| main thread dispatch | ~1ms | DispatchQueue.main.async |
+| handleHazardUpdate (P0-P5) | ~0.1ms | 优先级判定 + L/F/R 编码 |
+| BLE 传输 (.withoutResponse) | ~7-15ms | BLE 4.2 典型值 |
+| ESP32 loop 轮询延迟 | 0~20ms | delay(20) |
+| PWM → 电机机械响应 | ~5-10ms | ERM 振动电机启动延迟 |
+| **典型端到端延迟** | **~25-50ms** | 从采集完成到电机开始振动 |
+
+### 关键设计要点
+
+- **ESP32 无状态保持**: 收到 PWM 值后持续输出，不需要 iPhone 持续发送。电机在两帧之间 (~185ms) 保持上一帧的强度不变
+- **人体感知阈值**: 人对振动强度变化的感知约 50-100ms，5Hz 更新率 (200ms) 足够"实时"
+- **帧间对比机制**:
+  - `PoseSnapshot` 历史 (10 帧 ≈ 2s): 对比 ΔcameraY, ΔcameraPitch, ΔgroundY → 动态 EMA α
+  - Bool 滞后计数器: 连续 3 帧 true 才激活, 连续 5 帧 false 才关闭
+  - EMA 平滑: 角度 (α=0.3), 距离 (非对称 α=0.3/0.7), 电机强度 (α=0.4), 地面Y (α=0.1)
+- **可调参数**: `analysisInterval` 可降至 0.1s (10Hz) 获得更快响应，但功耗和发热增加
+
+---
+
+## P0-P5 触觉优先级编码
+
+```
+FrameAnalysisResult
+  │
+  ├── P0: 紧急停止
+  │     条件: noSafePathFound AND nearestForwardDistance < 1.0m
+  │     前方 ±15° 锥形区域完全阻塞且距离 < 1m
+  │     输出: L=255, F=255, R=255 (全电机最大)
+  │
+  ├── P1: 前方阻塞但有距离 (降级转向)
+  │     条件: noSafePathFound AND nearestForwardDistance ≥ 1.0m
+  │     找到最宽间隙 (即使 < 0.8m) 的方向，引导用户转向
+  │     输出: base=120~200, 按 best-effort gap 角度分配 L/F/R
+  │
+  ├── P2: 转向引导
+  │     条件: safePathExist AND NOT safePathStraight
+  │     存在 ≥ 0.8m 的安全通道但不在正前方
+  │     输出: base=80~255 (按距离紧迫度), 按 safePathAngle 分配 L/F/R
+  │
+  ├── P3: 地形警告 (叠加层)
+  │     条件: upStairsExist OR downStairsExist → F≥120
+  │           pathUpSlope OR pathDownSlope → F≥60
+  │     叠加在其他优先级之上
+  │
+  ├── P4: 侧面感知
+  │     条件: safePathExist AND safePathStraight (前方畅通)
+  │     两侧有障碍物时轻微提示
+  │     输出: 侧面电机 0~80 (距离 < 2m 时线性增强)
+  │
+  └── P5: 全清
+        条件: 以上均不满足
+        输出: L=0, F=0, R=0
+```
+
+### 前方锥形区域 (Forward Cone)
+
+```
+        ←─── FOV 46° ───→
+        ┌─────────────────┐
+        │   ·   ·   ·   · │
+        │  ╱─────────────╲ │ ← ±15° 前方锥形 (用于 P0 判定)
+        │ ╱               ╲│
+        │╱     P0 区域     ╲│
+        ├───────────────────┤
+        │← 边缘 →│← 中央 →│← 边缘 →│
+        │ ±15~23° │  ±15°  │ ±15~23°│
+        │ 不触发P0 │ 触发P0 │ 不触发P0│
+        └───────────────────┘
+              用户位置
+```
+
+FOV 边缘 (±15°~±23°) 的障碍物只参与 P2/P4 侧面感知，不触发 P0 紧急停止。
+这避免了走廊中侧墙误触发 P0 的问题。

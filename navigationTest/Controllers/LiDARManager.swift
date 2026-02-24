@@ -33,6 +33,13 @@ enum PointClassification: UInt8 {
     case dropSevere = 7
 }
 
+struct PoseSnapshot {
+    let cameraY: Float
+    let cameraPitch: Float
+    let bandGroundY: [Float]  // [near 0-1.5m, mid 1.5-3m, far 3-5m]
+    let timestamp: TimeInterval
+}
+
 struct ObstacleCluster {
     let centerAngle: Float      // obstacle center direction (°, 0=forward, +=right, -=left)
     let distance: Float         // nearest distance (m)
@@ -60,7 +67,9 @@ struct FrameAnalysisResult {
     // ── Auxiliary ──
     let nearestObstacleDistance: Float // nearest obstacle distance (m)
     let nearestObstacleAngle: Float   // nearest obstacle direction (°)
-    let groundY: Float                // current ground world Y height
+    let nearestForwardDistance: Float // nearest obstacle in forward cone ±15° (m)
+    let groundY: Float                // current ground world Y height (band 0 = near)
+    let bandGroundY: [Float]          // [near 0-1.5m, mid 1.5-3m, far 3-5m] ground Y
     let obstacles: [ObstacleCluster]  // detected obstacle clusters
 
     static let empty = FrameAnalysisResult(
@@ -68,7 +77,8 @@ struct FrameAnalysisResult {
         safePathWidth: 0, pathDownSlope: false, pathUpSlope: false,
         downStairsExist: false, upStairsExist: false, noSafePathFound: true,
         nearestObstacleDistance: Float.greatestFiniteMagnitude,
-        nearestObstacleAngle: 0, groundY: 0, obstacles: []
+        nearestObstacleAngle: 0, nearestForwardDistance: Float.greatestFiniteMagnitude,
+        groundY: 0, bandGroundY: [0, 0, 0], obstacles: []
     )
 }
 
@@ -168,7 +178,8 @@ class LiDARManager: NSObject {
     private var lastLogTime: TimeInterval = 0
 
     // B2 temporal state
-    private var smoothedGroundY: Float?
+    private var smoothedBandGroundY: [Float?] = [nil, nil, nil]  // near/mid/far
+    private var poseHistory: [PoseSnapshot] = []  // last ~10 frames for temporal validation
     private var smoothedAngle: Float = 0
     private var smoothedNearestDist: Float = 5.0
     private var lastCameraPitch: Float?  // degrees, 0=horizontal, +90=looking up, -90=looking down
@@ -400,16 +411,20 @@ extension LiDARManager {
             confidenceMap: confidenceMap
         )
 
-        // ── Step B: Ground Y estimation ──
-        let currentGroundY = estimateGroundY(worldPoints: worldPoints, validMask: validMask,
-                                              rows: rows, cols: cols, cameraY: transform.columns.3.y)
-
-        // ── Step C: Height classification ──
-        let classification = classifyPoints(worldPoints: worldPoints, validMask: validMask,
-                                             rows: rows, cols: cols, groundY: currentGroundY)
-
         // Camera position for relative distance calculations
         let camPos = simd_float3(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
+
+        // ── Step B: Distance-band ground Y estimation ──
+        let bandGroundY = estimateBandGroundY(
+            worldPoints: worldPoints, validMask: validMask,
+            rows: rows, cols: cols, cameraPos: camPos,
+            cameraPitch: lastCameraPitch ?? 0, timestamp: frame.timestamp
+        )
+
+        // ── Step C: Height classification (band-aware) ──
+        let classification = classifyPoints(worldPoints: worldPoints, validMask: validMask,
+                                             rows: rows, cols: cols,
+                                             bandGroundY: bandGroundY, cameraPos: camPos)
 
         // ── Step E: Stairs detection ──
         let (rawUpStairs, rawDownStairs) = detectStairs(
@@ -431,7 +446,7 @@ extension LiDARManager {
 
         // ── Step H: Safe path finding ──
         let (rawSPE, rawSPS, rawSPA, rawSPW, rawNSPF,
-             rawNearDist, rawNearAngle, obstacles) = findSafePath(
+             rawNearDist, rawNearAngle, rawForwardNearDist, obstacles) = findSafePath(
             freeDistance: freeDistance, cols: cols,
             classification: classification, worldPoints: worldPoints,
             validMask: validMask, rows: rows
@@ -465,7 +480,9 @@ extension LiDARManager {
             noSafePathFound: nspf,
             nearestObstacleDistance: smoothedNearestDist,
             nearestObstacleAngle: rawNearAngle,
-            groundY: currentGroundY,
+            nearestForwardDistance: rawForwardNearDist,
+            groundY: bandGroundY[0],
+            bandGroundY: bandGroundY,
             obstacles: obstacles
         )
     }
@@ -555,41 +572,110 @@ extension LiDARManager {
         return (worldPoints, validMask)
     }
 
-    // MARK: - Step B: Ground Y Estimation
+    // MARK: - Step B: Distance-Band Ground Y Estimation
 
-    private func estimateGroundY(
+    // Distance band boundaries (meters from camera)
+    private static let bandEdges: [Float] = [0.0, 1.5, 3.0, 5.0]  // 3 bands: near/mid/far
+    private static let bandCount = 3
+    private static let minBandPoints = 50  // minimum valid points per band for histogram
+
+    private func estimateBandGroundY(
         worldPoints: [[simd_float3]], validMask: [[Bool]],
-        rows: Int, cols: Int, cameraY: Float
-    ) -> Float {
-        // Collect all valid world Y values
-        var yValues: [Float] = []
-        yValues.reserveCapacity(rows * cols / 2)
+        rows: Int, cols: Int, cameraPos: simd_float3,
+        cameraPitch: Float, timestamp: TimeInterval
+    ) -> [Float] {
+        // ── 1. Collect Y values per distance band ──
+        var bandYValues: [[Float]] = Array(repeating: [], count: Self.bandCount)
+        for i in 0..<Self.bandCount { bandYValues[i].reserveCapacity(rows * cols / 6) }
 
         for r in 0..<rows {
             for c in 0..<cols {
-                if validMask[r][c] {
-                    yValues.append(worldPoints[r][c].y)
+                guard validMask[r][c] else { continue }
+                let pt = worldPoints[r][c]
+                let dx = pt.x - cameraPos.x
+                let dz = pt.z - cameraPos.z
+                let hdist2 = dx * dx + dz * dz  // squared distance (avoid sqrt)
+                // Band assignment: 0-1.5m → 0, 1.5-3.0m → 1, 3.0-5.0m → 2
+                let band: Int
+                if hdist2 < 2.25 {       // 1.5² = 2.25
+                    band = 0
+                } else if hdist2 < 9.0 { // 3.0² = 9.0
+                    band = 1
+                } else {
+                    band = 2
                 }
+                bandYValues[band].append(pt.y)
             }
         }
 
-        guard !yValues.isEmpty else {
-            // Fallback: assume phone held at ~1.2m
-            let fallback = cameraY - 1.2
-            if smoothedGroundY == nil { smoothedGroundY = fallback }
-            return smoothedGroundY!
+        // ── 2. Histogram peak per band ──
+        var rawBandGroundY: [Float?] = [nil, nil, nil]
+        for b in 0..<Self.bandCount {
+            rawBandGroundY[b] = histogramGroundY(yValues: bandYValues[b])
         }
 
-        // Histogram approach: bin size 0.05m
+        // ── 3. Fallback: if a band has too few points, inherit from neighbour ──
+        // Near band fallback: cameraY - 1.2m
+        if rawBandGroundY[0] == nil {
+            rawBandGroundY[0] = rawBandGroundY[1] ?? rawBandGroundY[2] ?? (cameraPos.y - 1.2)
+        }
+        if rawBandGroundY[1] == nil {
+            rawBandGroundY[1] = rawBandGroundY[0]
+        }
+        if rawBandGroundY[2] == nil {
+            rawBandGroundY[2] = rawBandGroundY[1]
+        }
+
+        let newBandGY = rawBandGroundY.map { $0! }
+
+        // ── 4. Pose-aware dynamic EMA alpha ──
+        var alpha = groundYAlpha  // base 0.1
+        if let prev = poseHistory.last {
+            let deltaPitch = abs(cameraPitch - prev.cameraPitch)
+            let deltaCamY = abs(cameraPos.y - prev.cameraY)
+            let deltaGY0 = abs(newBandGY[0] - prev.bandGroundY[0])
+
+            // Large pitch change → histogram sampling unstable → be conservative
+            if deltaPitch > 10.0 {
+                alpha *= 0.5
+            }
+            // Ground Y jumped but camera didn't move much → suspicious noise → very conservative
+            if deltaGY0 > 0.10 && deltaCamY < 0.03 {
+                alpha *= 0.3
+            }
+        }
+
+        // ── 5. Per-band EMA smoothing ──
+        var result: [Float] = [0, 0, 0]
+        for b in 0..<Self.bandCount {
+            if let prev = smoothedBandGroundY[b] {
+                result[b] = prev * (1 - alpha) + newBandGY[b] * alpha
+            } else {
+                result[b] = newBandGY[b]
+            }
+            smoothedBandGroundY[b] = result[b]
+        }
+
+        // ── 6. Store pose snapshot (keep last 10) ──
+        poseHistory.append(PoseSnapshot(
+            cameraY: cameraPos.y, cameraPitch: cameraPitch,
+            bandGroundY: result, timestamp: timestamp
+        ))
+        if poseHistory.count > 10 { poseHistory.removeFirst() }
+
+        return result
+    }
+
+    /// Histogram peak-finding for a single band's Y values.
+    /// Returns nil if too few points.
+    private func histogramGroundY(yValues: [Float]) -> Float? {
+        guard yValues.count >= Self.minBandPoints else { return nil }
+
         let binSize: Float = 0.05
         let minY = yValues.min()!
         let maxY = yValues.max()!
         let range = maxY - minY
-        guard range > 0 else {
-            let est = yValues[0]
-            smoothedGroundY = est
-            return est
-        }
+        guard range > 0 else { return yValues[0] }
 
         let numBins = max(1, Int(range / binSize) + 1)
         var histogram = Array(repeating: 0, count: numBins)
@@ -599,7 +685,7 @@ extension LiDARManager {
             histogram[bin] += 1
         }
 
-        // Find peak in lowest 30% of Y range (ground should be the lowest cluster)
+        // Find peak in lowest 30% of Y range (ground = lowest dense cluster)
         let searchBins = max(1, numBins * 30 / 100)
         var bestBin = 0
         var bestCount = 0
@@ -610,30 +696,26 @@ extension LiDARManager {
             }
         }
 
-        let newGroundY = minY + (Float(bestBin) + 0.5) * binSize
-
-        // EMA smooth
-        if let prev = smoothedGroundY {
-            smoothedGroundY = prev * (1 - groundYAlpha) + newGroundY * groundYAlpha
-        } else {
-            smoothedGroundY = newGroundY
-        }
-
-        return smoothedGroundY!
+        return minY + (Float(bestBin) + 0.5) * binSize
     }
 
     // MARK: - Step C: Height Classification
 
     private func classifyPoints(
         worldPoints: [[simd_float3]], validMask: [[Bool]],
-        rows: Int, cols: Int, groundY: Float
+        rows: Int, cols: Int, bandGroundY: [Float], cameraPos: simd_float3
     ) -> [[PointClassification]] {
         var cls = Array(repeating: Array(repeating: PointClassification.invalid, count: cols), count: rows)
 
         for r in 0..<rows {
             for c in 0..<cols {
                 guard validMask[r][c] else { continue }
-                let h = worldPoints[r][c].y - groundY
+                let pt = worldPoints[r][c]
+                let dx = pt.x - cameraPos.x
+                let dz = pt.z - cameraPos.z
+                let hdist2 = dx * dx + dz * dz
+                let band = hdist2 < 2.25 ? 0 : (hdist2 < 9.0 ? 1 : 2)
+                let h = pt.y - bandGroundY[band]
 
                 if h < dropSevereThreshold {
                     cls[r][c] = .dropSevere
@@ -839,7 +921,8 @@ extension LiDARManager {
         classification: [[PointClassification]], worldPoints: [[simd_float3]],
         validMask: [[Bool]], rows: Int
     ) -> (spe: Bool, sps: Bool, spa: Float, spw: Float, nspf: Bool,
-          nearDist: Float, nearAngle: Float, obstacles: [ObstacleCluster]) {
+          nearDist: Float, nearAngle: Float, forwardNearDist: Float,
+          obstacles: [ObstacleCluster]) {
 
         let centerCol = Float(cols) / 2.0 - 0.5  // 23.5 for 48 cols
 
@@ -910,6 +993,16 @@ extension LiDARManager {
         }
         let nearAngle = (Float(globalNearCol) - centerCol) * angPerCol
 
+        // ── Forward cone (±15°) nearest obstacle for P0 gating ──
+        let forwardConeHalfDeg: Float = 15.0
+        let forwardColSpan = Int(forwardConeHalfDeg / angPerCol)
+        let fwdStart = max(0, Int(centerCol) - forwardColSpan)
+        let fwdEnd = min(cols - 1, Int(centerCol) + forwardColSpan)
+        var forwardNearDist = maxAnalysisRange
+        for c in fwdStart...fwdEnd {
+            forwardNearDist = min(forwardNearDist, freeDistance[c])
+        }
+
         // ── Build obstacle clusters from blocked column groups ──
         var obstacleList: [ObstacleCluster] = []
         var blockStart: Int? = nil
@@ -964,8 +1057,16 @@ extension LiDARManager {
 
         // ── Select best corridor ──
         if passable.isEmpty {
-            return (spe: false, sps: false, spa: 0, spw: 0, nspf: true,
-                    nearDist: globalNearDist, nearAngle: nearAngle, obstacles: obstacleList)
+            // Best-effort: find widest gap (even < 0.8m) for degraded steering
+            var bestEffortAngle: Float = 0
+            var bestEffortWidth: Float = 0
+            if let widest = scored.max(by: { $0.physicalWidth < $1.physicalWidth }) {
+                bestEffortAngle = (widest.corridor.centerCol - centerCol) * angPerCol
+                bestEffortWidth = widest.physicalWidth
+            }
+            return (spe: false, sps: false, spa: bestEffortAngle, spw: bestEffortWidth,
+                    nspf: true, nearDist: globalNearDist, nearAngle: nearAngle,
+                    forwardNearDist: forwardNearDist, obstacles: obstacleList)
         }
 
         // Prefer corridor containing center (straight ahead)
@@ -994,7 +1095,8 @@ extension LiDARManager {
 
         return (spe: true, sps: isStraight, spa: bestAngle,
                 spw: best.physicalWidth, nspf: false,
-                nearDist: globalNearDist, nearAngle: nearAngle, obstacles: obstacleList)
+                nearDist: globalNearDist, nearAngle: nearAngle,
+                forwardNearDist: forwardNearDist, obstacles: obstacleList)
     }
 
     // MARK: - Obstacle Type Classification Helper
@@ -1080,7 +1182,8 @@ extension LiDARManager {
         let angleStr = String(format: "%+.1f°", a.safePathAngle)
         let widthStr = String(format: "%.2fm", a.safePathWidth)
         let nearStr  = String(format: "%.2fm@%+.0f°", a.nearestObstacleDistance, a.nearestObstacleAngle)
-        let groundStr = String(format: "%.3f", a.groundY)
+        let gY = a.bandGroundY
+        let groundStr = String(format: "gY=[%.2f|%.2f|%.2f]", gY[0], gY[1], gY[2])
 
         // Log camera pitch for verifying tilt-aware behaviour
         let pitchStr: String
@@ -1090,6 +1193,6 @@ extension LiDARManager {
             pitchStr = ""
         }
 
-        print("[B2] flags=[\(flagStr)] angle=\(angleStr) width=\(widthStr) near=\(nearStr) groundY=\(groundStr) obs=\(a.obstacles.count)\(pitchStr)")
+        print("[B2] flags=[\(flagStr)] angle=\(angleStr) width=\(widthStr) near=\(nearStr) \(groundStr) obs=\(a.obstacles.count)\(pitchStr)")
     }
 }
