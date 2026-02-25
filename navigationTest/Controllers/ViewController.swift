@@ -53,6 +53,19 @@ class ViewController: UIViewController {
     var depthGridContainer: UIView!
     var depthGridLabels: [[UILabel]] = []
 
+    // Toggle button for LiDAR grid visibility
+    private let lidarToggleButton: UIButton = {
+        let btn = UIButton(type: .system)
+        btn.setTitle("L", for: .normal)
+        btn.titleLabel?.font = UIFont.boldSystemFont(ofSize: 14)
+        btn.setTitleColor(.white, for: .normal)
+        btn.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.7)
+        btn.layer.cornerRadius = 22
+        btn.clipsToBounds = true
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        return btn
+    }()
+
     // B2: Hazard analysis debug label
     let hazardLabel: UILabel = {
         let label = UILabel()
@@ -73,7 +86,7 @@ class ViewController: UIViewController {
     private let motorAlpha: Float = 0.4  // EMA smoothing for motor output
     
     // Stage 6 单位为米
-    let threshold_1_radius = 20.0 // original = 4.0
+    let threshold_1_radius = 4.0 // original = 4.0 // At appartment = 20.0 //
     let threshold_2_width = 8.0 // original = 8.0
     let outlier_threshold_distance = 5.0 // original = 5.0
     
@@ -157,6 +170,7 @@ class ViewController: UIViewController {
             self?.handleHazardUpdate(analysis)
         }
         setupHazardLabel()
+        setupLidarToggle()
     }
 
     // 初始化并配置地图视图
@@ -302,6 +316,31 @@ class ViewController: UIViewController {
                 }
             }
         }
+    }
+
+    // MARK: - LiDAR Grid Toggle
+
+    private func setupLidarToggle() {
+        view.addSubview(lidarToggleButton)
+        NSLayoutConstraint.activate([
+            lidarToggleButton.widthAnchor.constraint(equalToConstant: 44),
+            lidarToggleButton.heightAnchor.constraint(equalToConstant: 44),
+            lidarToggleButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            lidarToggleButton.bottomAnchor.constraint(equalTo: hazardLabel.topAnchor, constant: -12),
+        ])
+        lidarToggleButton.addTarget(self, action: #selector(toggleLidarGrid), for: .touchUpInside)
+        // Start hidden
+        depthGridContainer.isHidden = true
+        hazardLabel.isHidden = true
+    }
+
+    @objc private func toggleLidarGrid() {
+        let show = depthGridContainer.isHidden
+        depthGridContainer.isHidden = !show
+        hazardLabel.isHidden = !show
+        lidarToggleButton.backgroundColor = show
+            ? UIColor.systemGreen.withAlphaComponent(0.8)
+            : UIColor.systemBlue.withAlphaComponent(0.7)
     }
 
     // MARK: - B2 Hazard Label Setup
