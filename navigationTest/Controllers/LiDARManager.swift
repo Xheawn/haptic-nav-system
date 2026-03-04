@@ -200,12 +200,18 @@ class LiDARManager: NSObject {
 
     /// Call once to start the ARSession with LiDAR depth.
     func start() {
+        // ARKit 的 6DOF 世界跟踪配置类（融合 LiDAR + IMU + 视觉惯性里程计）
         guard ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) else {
             print("[LiDAR] This device does NOT support sceneDepth (needs LiDAR hardware)")
             return
         }
 
         let config = ARWorldTrackingConfiguration()
+        // ARWorldTrackingConfiguration 支持的功能包括：
+            // 6 DOF 位姿追踪（position + rotation）
+            // 平面检测（.planeDetection）
+            // 场景重建（.sceneReconstruction）
+            // 场景深度（.sceneDepth）← 我们用的
         config.frameSemantics = .sceneDepth
         session.delegate = self
         session.run(config)
