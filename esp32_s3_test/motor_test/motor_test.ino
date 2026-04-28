@@ -1,10 +1,12 @@
 /*
- * ESP32-S3 Pin Scanner — 逐个测试 XIAO ESP32S3 所有引脚
+ * XIAO ESP32S3 3.3V Vibration Motor Pin Scanner
  *
- * 把你能动的那个电机的信号线接到每个引脚上测试，
- * 观察 Serial Monitor 输出，记录哪些引脚能让电机动。
+ * 接法：
+ * 电机一根线 -> GND
+ * 电机另一根线 -> 当前测试的 D 口
  *
- * 或者：三个电机全接着，看 Serial 打到哪个引脚时哪个电机动了。
+ * 看到 Serial Monitor 显示哪个 pin 时电机震动，
+ * 就记录那个 D 口 / GPIO。
  */
 
 struct PinEntry {
@@ -12,7 +14,6 @@ struct PinEntry {
   const char* label;
 };
 
-// XIAO ESP32-S3 全部可用引脚
 PinEntry allPins[] = {
   {1,  "D0  / GPIO1 "},
   {2,  "D1  / GPIO2 "},
@@ -24,38 +25,62 @@ PinEntry allPins[] = {
   {44, "D7  / GPIO44"},
   {7,  "D8  / GPIO7 "},
   {8,  "D9  / GPIO8 "},
-  {9,  "D10 / GPIO9 "},
+  {9,  "D10 / GPIO9 "}
 };
+
 const int NUM_PINS = 11;
+
+const int ON_TIME = 800;
+const int OFF_TIME = 1200;
+const int ROUND_DELAY = 3000;
+
+void setAllLow() {
+  for (int i = 0; i < NUM_PINS; i++) {
+    digitalWrite(allPins[i].gpio, LOW);
+  }
+}
 
 void setup() {
   Serial.begin(115200);
   delay(2000);
-  Serial.println("=== XIAO ESP32-S3 Pin Scanner ===");
-  Serial.println("逐个引脚 digitalWrite HIGH 2秒");
-  Serial.println("观察哪个电机在哪个引脚时振动\n");
 
-  // Init all LOW
+  Serial.println("=== XIAO ESP32S3 3.3V Motor Pin Scanner ===");
+  Serial.println("接法：D口 -> 电机 -> GND");
+  Serial.println("HIGH 时电机应该震动。");
+  Serial.println();
+
   for (int i = 0; i < NUM_PINS; i++) {
     pinMode(allPins[i].gpio, OUTPUT);
     digitalWrite(allPins[i].gpio, LOW);
   }
 
-  // Scan each pin
-  for (int i = 0; i < NUM_PINS; i++) {
-    Serial.printf(">>> [%2d/%d] %s  (gpio=%d) → HIGH\n",
-                  i + 1, NUM_PINS, allPins[i].label, allPins[i].gpio);
-    digitalWrite(allPins[i].gpio, HIGH);
-    delay(2000);
-    digitalWrite(allPins[i].gpio, LOW);
-    Serial.printf("<<<  %s → LOW\n\n", allPins[i].label);
-    delay(1000);
-  }
-
-  Serial.println("=== Scan Done ===");
-  Serial.println("记录哪些引脚让电机振动了，告诉我结果");
+  Serial.println("初始化完成，开始循环扫描。");
+  Serial.println();
 }
 
 void loop() {
-  delay(10000);
+  Serial.println("=== New Scan Round ===");
+
+  for (int i = 0; i < NUM_PINS; i++) {
+    setAllLow();
+
+    Serial.printf(">>> Testing [%2d/%d] %s  GPIO=%d  -> HIGH\n",
+                  i + 1, NUM_PINS, allPins[i].label, allPins[i].gpio);
+
+    digitalWrite(allPins[i].gpio, HIGH);
+    delay(ON_TIME);
+
+    digitalWrite(allPins[i].gpio, LOW);
+
+    Serial.printf("<<< Done: %s -> LOW\n\n", allPins[i].label);
+
+    delay(OFF_TIME);
+  }
+
+  setAllLow();
+
+  Serial.println("=== Scan Round Done ===");
+  Serial.println();
+
+  delay(ROUND_DELAY);
 }
