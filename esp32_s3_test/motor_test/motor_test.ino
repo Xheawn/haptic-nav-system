@@ -34,6 +34,9 @@ const int ON_TIME = 800;
 const int OFF_TIME = 1200;
 const int ROUND_DELAY = 3000;
 
+const bool LOOP_ENABLED = false;  // true = 持续循环, false = 只跑一次
+bool hasRun = false;
+
 void setAllLow() {
   for (int i = 0; i < NUM_PINS; i++) {
     digitalWrite(allPins[i].gpio, LOW);
@@ -59,6 +62,8 @@ void setup() {
 }
 
 void loop() {
+  if (!LOOP_ENABLED && hasRun) return;
+
   Serial.println("=== New Scan Round ===");
 
   for (int i = 0; i < NUM_PINS; i++) {
@@ -83,4 +88,6 @@ void loop() {
   Serial.println();
 
   delay(ROUND_DELAY);
+
+  hasRun = true;
 }
