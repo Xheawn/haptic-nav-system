@@ -31,10 +31,10 @@ PinEntry allPins[] = {
 const int NUM_PINS = 11;
 
 const int ON_TIME = 800;
-const int OFF_TIME = 1200;
+const int OFF_TIME = 200;
 const int ROUND_DELAY = 3000;
 
-const bool LOOP_ENABLED = false;  // true = 持续循环, false = 只跑一次
+const bool LOOP_ENABLED = true;  // true = 持续循环, false = 只跑一次
 bool hasRun = false;
 
 void setAllLow() {
