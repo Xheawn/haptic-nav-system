@@ -104,14 +104,14 @@ class LiDARManager: NSObject {
     /// 0.75 means use forward 75% of FOV, ignore bottom 25% (near feet).
     var forwardCropRatio: Float = 0.75
     /// How often to run analysis (seconds)
-    var analysisInterval: TimeInterval = 0.2   // 5 Hz (balances responsiveness vs battery/heat)
+    var analysisInterval: TimeInterval = 0.1   // 10 Hz (low-latency haptic feedback)
     /// How often to print to console (seconds)
     var logInterval: TimeInterval = 0.5        // 2 Hz
 
     // MARK: - B2 Hazard analysis parameters
 
     /// Minimum safe passage width (m), approx. shoulder width
-    var safeWidthConstant: Float = 0.8
+    var safeWidthConstant: Float = 0.5
     /// Direction column "safe" minimum obstacle distance (m)
     var minSafeDistance: Float = 2.0
     /// Maximum analysis range (m)

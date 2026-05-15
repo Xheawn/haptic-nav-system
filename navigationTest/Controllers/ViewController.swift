@@ -72,18 +72,35 @@ class ViewController: UIViewController {
         label.text = "B2: --"
         label.font = UIFont.monospacedSystemFont(ofSize: 10, weight: .medium)
         label.textAlignment = .left
-        label.numberOfLines = 3
+        label.numberOfLines = 5
         label.backgroundColor = UIColor.black.withAlphaComponent(0.7)
         label.textColor = .white
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
 
-    // B2: Smoothed motor intensities (0-255) for L/F/R
+    // B2: Smoothed motor intensities (0-255) for L/F/R (LiDAR micro)
     private var motorL: Float = 0
     private var motorF: Float = 0
     private var motorR: Float = 0
     private let motorAlpha: Float = 0.4  // EMA smoothing for motor output
+    private var lastUIUpdateTime: TimeInterval = 0
+    private let uiUpdateInterval: TimeInterval = 0.33  // UI at ~3Hz (saves main thread)
+    private var lastGridUpdateTime: TimeInterval = 0
+    private let gridUpdateInterval: TimeInterval = 0.5  // grid UI at ~2Hz (256 labels is heavy)
+
+    // Macro navigation motor cache (continuous mode, updated ~1Hz by GPS/compass)
+    private var macroMotorL: Float = 0
+    private var macroMotorF: Float = 0
+    private var macroMotorR: Float = 0
+
+    /// Map angleDiff (degrees) → continuous vibration intensity (0-255).
+    /// ≤5° → 0, 10° → 70, 90° → ~160, 180° → 255
+    private func angleDiffToIntensity(_ angleDiff: Double) -> Float {
+        if angleDiff <= 5.0 { return 0 }
+        if angleDiff >= 180.0 { return 255 }
+        return Float(70.0 + (angleDiff - 5.0) / 175.0 * 185.0)
+    }
     
     // Stage 6 单位为米
     let threshold_1_radius = 4.0 // original = 4.0 // At appartment = 20.0 //
@@ -164,7 +181,11 @@ class ViewController: UIViewController {
         setupDepthGridUI()
         LiDARManager.shared.start()
         LiDARManager.shared.onGridUpdate = { [weak self] grid in
-            self?.updateDepthGridUI(grid)
+            guard let self = self, !self.depthGridContainer.isHidden else { return }
+            let now = CACurrentMediaTime()
+            guard now - self.lastGridUpdateTime >= self.gridUpdateInterval else { return }
+            self.lastGridUpdateTime = now
+            self.updateDepthGridUI(grid)
         }
         LiDARManager.shared.onHazardUpdate = { [weak self] analysis in
             self?.handleHazardUpdate(analysis)
@@ -354,88 +375,83 @@ class ViewController: UIViewController {
         ])
     }
 
-    // MARK: - B2 Haptic Encoding (FrameAnalysisResult → L/F/R motor intensities)
+    // MARK: - B2 Haptic Encoding (FrameAnalysisResult → L/F/R pulse-rate urgency)
+    //
+    // Values sent to ESP32 mean PULSE RATE, not intensity:
+    //   255 = constant vibration (obstacle ≤ 0.2m)
+    //   1   = slowest pulse (0.1s on / 0.5s off, obstacle ~2m)
+    //   0   = motor off
+    // ESP32 handles actual pulse timing; vibration strength is fixed at 230 PWM.
+
+    /// Map obstacle distance → urgency value for pulse-rate encoding.
+    /// ≤0.2m → 255 (constant), 0.2–2.0m → 254–1 (linear), >2.0m → 0 (off)
+    private func distanceToUrgency(_ dist: Float) -> Float {
+        if dist <= 0.2 { return 255 }
+        if dist >= 2.0 { return 0 }
+        return 1.0 + 254.0 * (2.0 - dist) / 1.8
+    }
 
     private func handleHazardUpdate(_ a: FrameAnalysisResult) {
-        // Compute raw motor intensities based on priority
+        // Compute raw urgency values (0-255 = pulse rate, NOT intensity)
         var rawL: Float = 0, rawF: Float = 0, rawR: Float = 0
         var mode = "P5:clear"
 
         if a.noSafePathFound && a.nearestForwardDistance < 1.0 {
-            // P0: Emergency stop — forward ±15° fully blocked AND < 1m away
+            // P0: Emergency stop — all motors constant vibration
             rawL = 255; rawF = 255; rawR = 255
             mode = String(format: "P0:STOP fwd=%.1fm", a.nearestForwardDistance)
         } else if a.noSafePathFound {
-            // P1: Blocked but still have distance — steer toward best-effort gap
-            let theta = a.safePathAngle  // best-effort gap angle (may be narrow < 0.8m)
-            let urgency = 1.0 - min(max(a.nearestForwardDistance / LiDARManager.shared.maxAnalysisRange, 0), 1)
-            let base: Float = 120.0 + urgency * 80.0  // 120~200
+            // P1: Blocked but still have distance — pulse toward best-effort gap
+            let theta = a.safePathAngle
+            let urg = distanceToUrgency(a.nearestForwardDistance)
 
             if abs(theta) < 3.0 {
-                // No clear gap direction — warn forward
-                rawF = base
+                rawF = urg
             } else if theta >= 0 {
-                let rWeight = min(1.0, theta / 45.0)
-                let fWeight = max(0.0, 1.0 - theta / 45.0)
-                rawR = base * rWeight
-                rawF = base * fWeight
+                rawR = urg
+                rawF = urg * max(0.0, 1.0 - theta / 45.0)
             } else {
-                let absTheta = abs(theta)
-                let lWeight = min(1.0, absTheta / 45.0)
-                let fWeight = max(0.0, 1.0 - absTheta / 45.0)
-                rawL = base * lWeight
-                rawF = base * fWeight
+                rawL = urg
+                rawF = urg * max(0.0, 1.0 - abs(theta) / 45.0)
             }
             mode = String(format: "P1:blocked %+.0f° fwd=%.1fm", theta, a.nearestForwardDistance)
         } else if a.safePathExist && !a.safePathStraight {
-            // P2: Steering guidance — angle → L/F/R weight interpolation
-            let theta = a.safePathAngle  // °, +=right, -=left
-            let urgency = 1.0 - min(max(a.nearestObstacleDistance / LiDARManager.shared.maxAnalysisRange, 0), 1)
-            let base = 80.0 + urgency * 175.0  // 80~255
+            // P2: Steering guidance — pulse the direction motor
+            let theta = a.safePathAngle
+            let urg = distanceToUrgency(a.nearestObstacleDistance)
 
             if theta >= 0 {
-                // Safe path is to the right → guide right
-                let rWeight = min(1.0, theta / 45.0)
-                let fWeight = max(0.0, 1.0 - theta / 45.0)
-                rawR = base * rWeight
-                rawF = base * fWeight
+                rawR = urg
+                rawF = urg * max(0.0, 1.0 - theta / 45.0)
                 rawL = 0
             } else {
-                // Safe path is to the left → guide left
-                let absTheta = abs(theta)
-                let lWeight = min(1.0, absTheta / 45.0)
-                let fWeight = max(0.0, 1.0 - absTheta / 45.0)
-                rawL = base * lWeight
-                rawF = base * fWeight
+                rawL = urg
+                rawF = urg * max(0.0, 1.0 - abs(theta) / 45.0)
                 rawR = 0
             }
             mode = String(format: "P2:steer %+.0f°", theta)
         } else if a.safePathExist && a.safePathStraight {
-            // P4: Side awareness (obstacles on sides but path ahead is clear)
-            // Check nearest obstacle on each half
-            let analysis = LiDARManager.shared.latestAnalysis
-            for obs in analysis.obstacles {
-                let dist = max(0.3, obs.distance)
-                let sideIntensity = max(0, 80.0 * (1.0 - dist / 2.0))  // max 80 at <0.3m
+            // P4: Side awareness — pulse side motors based on side obstacle distance
+            for obs in a.obstacles {
+                let urg = distanceToUrgency(obs.distance)
                 if obs.centerAngle < 0 {
-                    rawL = max(rawL, sideIntensity)
+                    rawL = max(rawL, urg)
                 } else {
-                    rawR = max(rawR, sideIntensity)
+                    rawR = max(rawR, urg)
                 }
             }
-            if rawL > 5 || rawR > 5 {
+            if rawL > 0 || rawR > 0 {
                 mode = String(format: "P4:sides L%.0f R%.0f", rawL, rawR)
             }
-            // F stays 0 for clear path
         }
 
-        // P3: Terrain alert overlay (additive on F motor)
+        // P3: Terrain alert overlay — medium-fast pulse on F motor
         if a.upStairsExist || a.downStairsExist {
-            rawF = max(rawF, 120)
+            rawF = max(rawF, 180)  // fast pulse for stairs
             mode += a.upStairsExist ? " +stairs↑" : " +stairs↓"
         }
         if a.pathUpSlope || a.pathDownSlope {
-            rawF = max(rawF, 60)
+            rawF = max(rawF, 100)  // medium pulse for slopes
             mode += a.pathUpSlope ? " +slope↑" : " +slope↓"
         }
 
@@ -444,21 +460,65 @@ class ViewController: UIViewController {
         rawF = min(255, max(0, rawF))
         rawR = min(255, max(0, rawR))
 
-        // EMA smooth motor output
+        // EMA smooth urgency output
         motorL = motorL * (1 - motorAlpha) + rawL * motorAlpha
         motorF = motorF * (1 - motorAlpha) + rawF * motorAlpha
         motorR = motorR * (1 - motorAlpha) + rawR * motorAlpha
 
-        // Update debug label
-        let labelText = String(format: "B2: %@ | L=%03.0f F=%03.0f R=%03.0f\nnear=%.1fm@%+.0f° w=%.1fm gY=%.2f obs=%d",
-                                mode, motorL, motorF, motorR,
-                                a.nearestObstacleDistance, a.nearestObstacleAngle,
-                                a.safePathWidth, a.groundY, a.obstacles.count)
-        hazardLabel.text = labelText
+        // ── BLE send ALWAYS at full 10Hz (low latency) ──
+        // (moved above UI update so haptics are never delayed by UI)
 
-        // Console log (uses same throttle as LiDARManager's 2Hz log)
-        print(String(format: "[HAPTIC] %@ | L=%03.0f F=%03.0f R=%03.0f",
-                     mode, motorL, motorF, motorR))
+        // ── UI + console log throttled to ~3Hz (save main thread) ──
+        let now = CACurrentMediaTime()
+        if now - lastUIUpdateTime >= uiUpdateInterval {
+            lastUIUpdateTime = now
+
+            let line1 = String(format: "B2: %@ | L=%03.0f F=%03.0f R=%03.0f",
+                               mode, motorL, motorF, motorR)
+            let line2 = String(format: "near=%.2fm@%+.0f° fwdNear=%.2fm",
+                               a.nearestObstacleDistance, a.nearestObstacleAngle,
+                               a.nearestForwardDistance)
+            let line3 = String(format: "width=%.2fm (min=%.1f) nspf=%@ spe=%@",
+                               a.safePathWidth,
+                               LiDARManager.shared.safeWidthConstant,
+                               a.noSafePathFound ? "T" : "F",
+                               a.safePathExist ? "T" : "F")
+            let line4 = String(format: "angle=%+.1f° straight=%@ obs=%d gY=[%.2f|%.2f|%.2f]",
+                               a.safePathAngle,
+                               a.safePathStraight ? "T" : "F",
+                               a.obstacles.count,
+                               a.bandGroundY[0], a.bandGroundY[1], a.bandGroundY[2])
+            let flags = [
+                a.upStairsExist ? "stairs↑" : nil,
+                a.downStairsExist ? "stairs↓" : nil,
+                a.pathUpSlope ? "slope↑" : nil,
+                a.pathDownSlope ? "slope↓" : nil
+            ].compactMap { $0 }.joined(separator: " ")
+            let line5 = String(format: "terrain: %@ pitch=%@",
+                               flags.isEmpty ? "none" : flags,
+                               "--")
+            hazardLabel.text = [line1, line2, line3, line4, line5].joined(separator: "\n")
+
+            print(String(format: "[HAPTIC] %@ | L=%03.0f F=%03.0f R=%03.0f",
+                         mode, motorL, motorF, motorR))
+        }
+
+        // ── Arbitration: LiDAR (pulse) vs Macro (continuous) ──
+        let lidarActive = (motorL > 1 || motorF > 1 || motorR > 1)
+
+        if lidarActive {
+            // Micro priority → cmd=0x01 pulse mode
+            let lByte = UInt8(clamping: Int(motorL.rounded()))
+            let fByte = UInt8(clamping: Int(motorF.rounded()))
+            let rByte = UInt8(clamping: Int(motorR.rounded()))
+            BLEManager.shared.sendCommand(Data([0x01, lByte, fByte, rByte]))
+        } else {
+            // Path clear → cmd=0x02 continuous mode (macro nav)
+            let mL = UInt8(clamping: Int(macroMotorL.rounded()))
+            let mF = UInt8(clamping: Int(macroMotorF.rounded()))
+            let mR = UInt8(clamping: Int(macroMotorR.rounded()))
+            BLEManager.shared.sendCommand(Data([0x02, mL, mF, mR]))
+        }
     }
 
     // Stage 4
@@ -571,15 +631,8 @@ extension ViewController {
             self.lastAngleDiffOut = nil
             self.updateAdjustUI(adjustDirection: 3, angleDiff: nil)
 
-            // Optionally notify peripheral that we're off-route (direction=3, magnitude=0)
-            let now = Date()
-            if let last = lastBLECommandSentAt, now.timeIntervalSince(last) < 0.2 {
-                // throttle to 5 Hz
-            } else {
-                let packet = Data([3, 0])
-                BLEManager.shared.sendCommand(packet)
-                lastBLECommandSentAt = now
-            }
+            // Off-route: cache macro motor values (arbitration layer sends via BLE)
+            macroMotorL = 0; macroMotorF = 80; macroMotorR = 0
 
             if threshold3Timer == nil {
                 if let lastCoord = lastRecalculationCoordinate {
@@ -677,19 +730,16 @@ extension ViewController {
 
         self.updateAdjustUI(adjustDirection: adjustDirection, angleDiff: angleDiffOut)
 
-        // Send minimal 2-byte packet: [AdjustDirection, AngleDiffMagnitude]
-        // Clamp AngleDiffMagnitude to 0...180 and round to nearest integer
-        let magnitudeInt = max(0, min(180, Int(round(angleDiffOut))))
-        let magnitude = UInt8(magnitudeInt)
-
-        let now = Date()
-        if let last = lastBLECommandSentAt, now.timeIntervalSince(last) < 0.2 {
-            // throttle to 5 Hz
-        } else {
-            let packet = Data([adjustDirection, magnitude])
-            BLEManager.shared.sendCommand(packet)
-            lastBLECommandSentAt = now
+        // Compute macro motor values (cached for arbitration layer)
+        let intensity = angleDiffToIntensity(abs(angleDiffOut))
+        macroMotorL = 0; macroMotorF = 0; macroMotorR = 0
+        switch adjustDirection {
+        case 1:  macroMotorR = intensity  // need left turn → right side is "off" → vibrate R
+        case 2:  macroMotorL = intensity  // need right turn → left side is "off" → vibrate L
+        case 3:  macroMotorF = 80         // off-route → front motor
+        default: break
         }
+        // NOTE: macro does NOT send BLE directly — arbitration in handleHazardUpdate sends it
 
         // Log for debugging
         print("[ADJUST] phone=\(formatAngle(phoneAngle))°, desired=\(formatAngle(desiredAngle))°")
