@@ -93,6 +93,7 @@ class ViewController: UIViewController {
     private var macroMotorL: Float = 0
     private var macroMotorF: Float = 0
     private var macroMotorR: Float = 0
+    private let microNavigationOnlyForTesting = true
 
     /// Map angleDiff (degrees) → continuous vibration intensity (0-255).
     /// ≤5° → 0, 10° → 70, 90° → ~160, 180° → 255
@@ -512,6 +513,9 @@ class ViewController: UIViewController {
             let fByte = UInt8(clamping: Int(motorF.rounded()))
             let rByte = UInt8(clamping: Int(motorR.rounded()))
             BLEManager.shared.sendCommand(Data([0x01, lByte, fByte, rByte]))
+        } else if microNavigationOnlyForTesting {
+            // Temporary LiDAR-only test mode: suppress macro navigation output.
+            BLEManager.shared.sendCommand(Data([0x01, 0, 0, 0]))
         } else {
             // Path clear → cmd=0x02 continuous mode (macro nav)
             let mL = UInt8(clamping: Int(macroMotorL.rounded()))
@@ -770,4 +774,3 @@ extension ViewController {
         }
     }
 }
-
